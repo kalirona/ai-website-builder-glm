@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Sparkles, Loader2, Wand2, AlertCircle, X } from "lucide-react"
+import { Sparkles, Loader2, Wand2, AlertCircle } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -316,7 +316,3 @@ export function AskAiButton({ nodeId, disabled }: { nodeId: string; disabled?: b
     </button>
   )
 }
-
-// keep the X import used for tree-shaking clarity (avoids unused warning if
-// the close icon is later customized)
-void X
