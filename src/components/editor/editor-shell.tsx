@@ -10,6 +10,7 @@ import { TopBar } from "./top-bar"
 import { LeftSidebar } from "./left-sidebar"
 import { RightPanel } from "./right-panel"
 import { EditorCanvas } from "./canvas"
+import { AiAssistant } from "./ai-assistant"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorShortcuts } from "@/hooks/use-editor-shortcuts"
 import { safeParse } from "@/lib/utils"
@@ -134,6 +135,9 @@ export function EditorShell({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      {/* AI assistant — mounted once; opens via the toolbar's Ask AI button.
+          Opening/closing never touches editor history or dirty state. */}
+      <AiAssistant />
     </div>
   )
 }

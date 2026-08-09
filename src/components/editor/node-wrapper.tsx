@@ -12,6 +12,7 @@ import {
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
 import { getComponent } from "@/lib/editor/registry"
+import { AskAiButton } from "./ai-assistant"
 import { cn } from "@/lib/utils"
 
 /**
@@ -133,6 +134,7 @@ export function NodeWrapper({
           <span className="px-1.5 text-[11px] font-medium leading-none">
             {def.name}
           </span>
+          <AskAiButton nodeId={nodeId} />
           <div className="mx-0.5 h-3.5 w-px bg-slate-700" />
           <ToolbarBtn onClick={moveUp} title="Move up" disabled={isRoot}>
             <ChevronUp className="h-3.5 w-3.5" />
