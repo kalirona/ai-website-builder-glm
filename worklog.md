@@ -533,3 +533,46 @@ Stage Summary:
 - Endpoint behavior: returns a validated, non-persisted patch. Client will later preview → apply → undo → save.
 - Security: authenticated, owner-checked (403 vs 404), node-exists, root-protected, client cannot spoof state, zero DB writes.
 - No store/UI/preview/Prisma changes. Existing generate endpoint untouched.
+
+---
+Task ID: 2.5
+Agent: orchestrator
+Task: Phase 2.5 — Apply AI section patch to editor store (applySectionPatch action, merge mode, undo/redo). No UI/API/provider/Prisma changes.
+
+Work Log:
+- Inspected exact current store.ts: confirmed the snapshot→past→clear-future→set-dirty contract used by every mutation (updateProps/updateStyles/addNode/removeNode/moveNode/duplicateNode). snapshot() uses cloneEditorData (deep clone), so history entries are independent.
+- Added pure helper applySectionMerge(data, nodeId, patch) to node-ops.ts (server-safe, no AI-module dep). Returns {ok, nodes} | {ok:false, reason}. Handles:
+  - root + parent===null rejection
+  - node existence
+  - patch shape + patch.node existence
+  - component type protection (patch.node.type !== existing.type → reject)
+  - rejects AI-supplied id/parent fields anywhere in subtree
+  - props/styles shallow-merge (existing keys not in patch survive)
+  - children: patch omits children → PRESERVE existing; patch provides array → REPLACE with fresh-id descendants (old descendants removed from map)
+  - descendant ids generated via genId(type) with uniqueness guard
+  - cycle check on parent chain
+- Added PatchTreeNode type (structural mirror of AiTreeNode, keeps node-ops AI-module-free) + ApplySectionResult discriminated union.
+- Fixed ordering bug: removeDescendantsFromMap now only called in the REPLACE branch (initial version called it unconditionally, which would delete children meant to be preserved).
+- Added applySectionPatch(nodeId, patch): boolean to the EditorStoreState interface + implementation in store.ts. Imports applySectionMerge + PatchTreeNode from node-ops, type-only SectionEditOutput from section-schemas. Follows the exact history contract: snapshot pre-state → push to past (capped 50) → clear future → apply → dirty=true. selectedId stays on nodeId (id preserved). Returns false on rejection WITHOUT snapshotting (no history pollution). No API calls.
+
+Verification:
+- bunx tsc --noEmit: src/lib/editor/ 0 errors. (2 pre-existing Phase-1 errors elsewhere, unchanged.)
+- bun run lint: 0 errors, 0 warnings.
+- Real store smoke test (31 assertions, 7 scenarios, pure store via getState): 31/31 passed.
+  T1 merge only headline: headline changed, subheadline UNCHANGED, id+parent unchanged.
+  T2 history: past +1 exactly, future cleared, dirty=true.
+  T3 undo: exact original state restored (headline + subheadline), future=1.
+  T4 redo: AI state restored, future=0.
+  T5 root patch: rejected, NO history entry added.
+  T6 wrong component type: rejected, NO history entry added.
+  T7 new descendants: applied; section id+parent unchanged; merged props (old:true survived, newProp added); merged styles (background survived, padding added); children replaced (2 top-level); old child removed; 3 fresh descendant ids generated (heading_*, text_*, button_*); no duplicate ids; nested button reaches root (no cycle); all child references valid.
+
+Stage Summary:
+- Files modified: src/lib/editor/node-ops.ts (added applySectionMerge + PatchTreeNode + helpers), src/lib/editor/store.ts (added applySectionPatch action + interface + imports).
+- Files created: none.
+- New store action: applySectionPatch(nodeId, patch): boolean.
+- Merge behavior: shallow-merge props + styles (preserve untouched); children preserved unless patch explicitly provides array.
+- ID handling: AI never supplies ids; all new descendant ids generated via genId(type) with uniqueness guard; selected node id+parent stable.
+- Undo/redo: exactly ONE history entry per apply; undo restores pre-patch; redo restores patch; rejections add no history.
+- Validation: root/parent-null reject, node-exists, type-match, no AI id/parent fields, no duplicate ids, no cycles.
+- No persistence (no API calls). No design-token changes. No UI.

@@ -3,6 +3,7 @@
 import { create } from "zustand"
 import type { EditorData, Node, Device, DesignTokens } from "./types"
 import { defaultDesignTokens } from "./types"
+import type { SectionEditOutput } from "@/lib/ai/section-schemas"
 import {
   cloneEditorData,
   makeNode,
@@ -10,6 +11,8 @@ import {
   removeNode,
   moveNode,
   duplicateNode,
+  applySectionMerge,
+  type PatchTreeNode,
 } from "./node-ops"
 
 // Re-exported for client convenience. Server code should import from
@@ -50,6 +53,13 @@ interface EditorStoreState {
   duplicateNode: (id: string) => void
   updateProps: (id: string, patch: Record<string, unknown>) => void
   updateStyles: (id: string, patch: Record<string, unknown>) => void
+  /**
+   * Apply a validated AI section patch to a node (merge mode). Creates
+   * exactly ONE undo history entry. Preserves the node's id + parent.
+   * Returns true on success, false if rejected (root / type mismatch /
+   * malformed patch). Never persists. (Phase 2.5)
+   */
+  applySectionPatch: (nodeId: string, patch: SectionEditOutput) => boolean
   undo: () => void
   redo: () => void
   canUndo: () => boolean
@@ -204,6 +214,39 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       dirty: true,
       future: [],
     })
+  },
+
+  applySectionPatch: (nodeId, patch) => {
+    const state = get()
+    // Root protection + existence — handled inside applySectionMerge too,
+    // but we short-circuit here for clarity and to avoid snapshotting on a
+    // doomed operation.
+    if (nodeId === state.rootId) return false
+    const existing = state.nodes[nodeId]
+    if (!existing) return false
+    if (existing.parent === null) return false
+
+    // Component type protection + merge + id generation + cycle check.
+    const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    const patchNode: PatchTreeNode = {
+      type: patch.node.type,
+      props: patch.node.props,
+      styles: patch.node.styles,
+      children: patch.node.children ?? [],
+    }
+    const result = applySectionMerge(data, nodeId, { node: patchNode })
+    if (!result.ok) return false
+
+    // ONE history entry: snapshot the pre-patch state, clear future, apply.
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes: result.nodes,
+      // selection stays on the same node (its id is preserved)
+      selectedId: nodeId,
+      dirty: true,
+      future: [],
+    })
+    return true
   },
 
   undo: () => {
