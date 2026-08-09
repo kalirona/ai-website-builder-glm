@@ -448,3 +448,26 @@ Stage Summary:
 - Architecture honors the core principle: structured schema is the source of truth (AI → schema → editor → published site all share NodeRenderer).
 - AI provider is swappable (AIProvider interface). Multi-tenancy enforced (owner check on every route).
 - Excluded per spec §20: billing, collaboration, custom domains, templates UI, n8n/directus deployment — abstractions only.
+
+---
+Task ID: 2.2
+Agent: orchestrator
+Task: Phase 2.2 — AI section-edit schema/types foundation (no UI, no store, no API, no AI calls)
+
+Work Log:
+- Inspected existing schemas: reused `nodeSchema` (recursive, .passthrough) + `designTokensSchema` from `./schemas`, and `AiTreeNode` type from `./provider`. Did NOT duplicate Node/EditorData.
+- Created `src/lib/ai/section-schemas.ts` with: `sectionEditInputSchema` + `SectionEditInput` type; `sectionEditOutputSchema` (base: structure + safety); `sectionEditOutputSchemaFor(expectedType)` factory (adds type-preservation refine); `SectionEditOutput` type; `sectionEditModeSchema` (literal "merge").
+- Safety enforced via superRefine: (1) no editor-internal `id`/`parent` fields anywhere in subtree; (2) no executable JS / HTML in any string value (regex: script/iframe/object/embed tags, javascript: URLs, on\w+= handlers, <tag> markup — closing `>` required so harmless "a < b" prose is allowed); (3) node count ≤ 100; (4) depth ≤ 6.
+- Type preservation: `sectionEditOutputSchemaFor(expectedNodeType)` rejects outputs whose `node.type` !== selected component type, with a precise error message.
+- mode is `z.literal("merge")` per "keep it simple"; "replace" deferred to a later phase.
+
+Validation run (one-off, not committed):
+- 12 runtime assertions: valid pass, wrong-mode reject, type-mismatch reject, <script> reject, <div> HTML reject, javascript: URL reject, editor id reject, nested parent reject, harmless "< $100" prose ALLOWED, too-deep reject, valid input pass, empty-instruction reject. 12/12 passed.
+
+Stage Summary:
+- Files created: src/lib/ai/section-schemas.ts (only).
+- Files modified: none.
+- `bunx tsc --noEmit`: section-schemas.ts clean (0 errors). 2 pre-existing Phase-1 TS errors in unrelated files (editor page select shape, left-sidebar rootId) — NOT caused by this change, NOT fixed (out of scope).
+- `bun run lint`: 0 errors, 0 warnings.
+- No test suite exists in the project; ran a throwaway runtime smoke test instead (cleaned up).
+- Phase 2.2 complete. Next phases (provider impl, API route, store action, UI) NOT started.
