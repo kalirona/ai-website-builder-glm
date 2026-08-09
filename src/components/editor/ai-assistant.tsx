@@ -107,6 +107,8 @@ export function AiAssistant() {
   const selectedId = useEditorStore((s) => s.selectedId)
   const applySectionPatch = useEditorStore((s) => s.applySectionPatch)
   const select = useEditorStore((s) => s.select)
+  const setPreviewPatch = useEditorStore((s) => s.setPreviewPatch)
+  const clearPreviewPatch = useEditorStore((s) => s.clearPreviewPatch)
 
   // Prefer the explicitly-requested node; fall back to the current selection.
   const nodeId = openNodeId ?? selectedId
@@ -142,6 +144,18 @@ export function AiAssistant() {
     }
   }, [nodeId])
 
+  // Selection safety (Phase 2.8): if the user selects a different component
+  // while an AI preview is active, clear the preview so a stale Hero patch
+  // can't be seen on / applied to a newly-selected Features component.
+  useEffect(() => {
+    const requested = requestedNodeIdRef.current
+    if (requested && selectedId && selectedId !== requested) {
+      clearPreviewPatch()
+      setResult(null)
+      setApplyError("Selection changed. Generate this change again for the current section.")
+    }
+  }, [selectedId, clearPreviewPatch])
+
   const handleGenerate = async () => {
     if (!nodeId || !projectId || !node) return
     const trimmed = instruction.trim()
@@ -174,8 +188,12 @@ export function AiAssistant() {
         return
       }
       // The server returns { patch: { mode, node, summary } }, already
-      // Zod-validated. Store it temporarily for review (Phase 2.6).
-      setResult(data.patch as SectionEditOutput)
+      // Zod-validated. Set the preview so the canvas shows the proposed change
+      // (Phase 2.8). The real nodes map is NOT mutated — preview is a virtual
+      // overlay. Apply happens only when the user clicks Apply Changes.
+      const patch = data.patch as SectionEditOutput
+      setResult(patch)
+      setPreviewPatch(nodeId, patch)
     } catch {
       setError("Network error. Please try again.")
     } finally {
@@ -210,9 +228,10 @@ export function AiAssistant() {
 
     setApplying(true)
     setApplyError(null)
-    // Use the existing store action as-is. It returns false on rejection
-    // (root/type-mismatch/malformed) and creates exactly ONE history entry
-    // on success. It does NOT persist — existing Save handles that.
+    // Clear the virtual preview BEFORE applying the real patch. The existing
+    // store action creates exactly ONE history entry on success. It does NOT
+    // persist — existing Save handles that.
+    clearPreviewPatch()
     const ok = applySectionPatch(requestedId, result)
     setApplying(false)
 
@@ -239,16 +258,19 @@ export function AiAssistant() {
   }
 
   const handleDiscard = () => {
-    // Discard the temporary patch; return to the instruction state so the
-    // user can generate again. No editor/history/save changes.
+    // Discard the temporary patch + clear the canvas preview; return to the
+    // instruction state so the user can generate again. No editor/history/save
+    // changes.
+    clearPreviewPatch()
     setResult(null)
     setApplyError(null)
   }
 
   const handleClose = (openState: boolean) => {
     if (!openState) {
-      // Closing: discard the temporary patch + reset. No editor changes,
-      // no history, no save. Same safe behavior as Discard.
+      // Closing: discard the temporary patch + clear preview + reset. No editor
+      // changes, no history, no save. Same safe behavior as Discard.
+      clearPreviewPatch()
       setOpenNodeId(null)
       setResult(null)
       setError(null)
@@ -354,18 +376,21 @@ export function AiAssistant() {
             </div>
           )}
 
-          {/* Result */}
+          {/* Result — AI Preview */}
           {result && (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+            <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900 dark:bg-violet-950/20">
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <Sparkles className="h-3 w-3 text-primary" />
-                  AI suggestion
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                  <Sparkles className="h-3 w-3" />
+                  AI Preview
                 </div>
-                <p className="text-sm leading-relaxed">{result.summary}</p>
+                <p className="text-sm leading-relaxed text-foreground">{result.summary}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Your changes are previewed on the canvas.
+                </p>
                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <Badge variant="secondary" className="text-[11px]">
-                    {def?.name ?? node?.type} section updated
+                    {def?.name ?? node?.type} section
                   </Badge>
                   <Badge variant="outline" className="text-[11px]">
                     Mode: Merge

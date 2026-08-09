@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -15,12 +15,17 @@ import { EditorContextProvider } from "./editor-context"
 import { NodeRenderer } from "./node-renderer"
 import { tokensToCssVars, deviceWidth } from "@/lib/editor/design-tokens"
 import { getComponent } from "@/lib/editor/registry"
-import { isDescendant } from "@/lib/editor/node-ops"
+import { isDescendant, applySectionMerge, type PatchTreeNode } from "@/lib/editor/node-ops"
+import { Breadcrumb } from "./breadcrumb"
 import { cn } from "@/lib/utils"
 
 /**
  * The editor canvas. Sets up the editor context, design-token CSS vars,
  * the responsive viewport, and the DnD context for moving/adding nodes.
+ *
+ * Phase 2.8: when an AI preview patch is active, the canvas renders a virtual
+ * overlay (computed via the same `applySectionMerge` used by Apply) instead of
+ * the real nodes. The real `nodes` in the store are NEVER mutated by preview.
  */
 export function EditorCanvas() {
   const nodes = useEditorStore((s) => s.nodes)
@@ -33,6 +38,7 @@ export function EditorCanvas() {
   const addNode = useEditorStore((s) => s.addNode)
   const moveNode = useEditorStore((s) => s.moveNode)
   const hydrated = useEditorStore((s) => s.hydrated)
+  const previewPatch = useEditorStore((s) => s.previewPatch)
 
   const [activeDrag, setActiveDrag] = useState<
     | { kind: "palette"; type: string }
@@ -46,6 +52,27 @@ export function EditorCanvas() {
 
   const width = deviceWidth(device)
   const data = { nodes, rootId }
+
+  // Phase 2.8: compute a virtual renderNodes that overlays the AI preview patch.
+  // Reuses the SAME applySectionMerge used by Apply — so preview === what Apply
+  // produces. The real `nodes` in the store are never mutated.
+  const renderNodes = useMemo(() => {
+    if (!previewPatch) return nodes
+    const patchNode: PatchTreeNode = {
+      type: previewPatch.patch.node.type,
+      props: previewPatch.patch.node.props,
+      styles: previewPatch.patch.node.styles,
+      children: previewPatch.patch.node.children ?? [],
+    }
+    const result = applySectionMerge(
+      { nodes, rootId },
+      previewPatch.nodeId,
+      { node: patchNode }
+    )
+    return result.ok ? result.nodes : nodes
+  }, [nodes, rootId, previewPatch])
+
+  const previewNodeId = previewPatch?.nodeId ?? null
 
   const handleDragStart = (e: DragStartEvent) => {
     const id = String(e.active.id)
@@ -130,30 +157,38 @@ export function EditorCanvas() {
           editable: true,
           device,
           designTokens,
-          nodes,
+          nodes: renderNodes,
           select,
           updateProps,
           selectedId,
+          previewNodeId,
         }}
       >
         <div
-          className="flex h-full w-full justify-center overflow-auto bg-slate-100 p-4 sm:p-8"
+          className="flex h-full w-full flex-col overflow-hidden bg-slate-100"
           onClick={() => select(null)}
         >
-          <div
-            className={cn(
-              "shadow-xl transition-all duration-200",
-              width ? "rounded-xl" : "rounded-xl w-full max-w-[1280px]"
-            )}
-            style={{
-              width: width ? `${width}px` : "100%",
-              maxWidth: width ? `${width}px` : "1280px",
-              background: designTokens.background,
-              ...tokensToCssVars(designTokens),
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <NodeRenderer nodeId={rootId} />
+          {/* Breadcrumb bar (Phase 2.8) */}
+          <div className="shrink-0 border-b bg-card px-4 py-1.5" onClick={(e) => e.stopPropagation()}>
+            <Breadcrumb />
+          </div>
+          {/* Scrollable canvas area */}
+          <div className="flex-1 overflow-auto p-4 sm:p-8">
+            <div
+              className={cn(
+                "mx-auto shadow-xl transition-all duration-200",
+                width ? "rounded-xl" : "rounded-xl w-full max-w-[1280px]"
+              )}
+              style={{
+                width: width ? `${width}px` : "100%",
+                maxWidth: width ? `${width}px` : "1280px",
+                background: designTokens.background,
+                ...tokensToCssVars(designTokens),
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <NodeRenderer nodeId={rootId} />
+            </div>
           </div>
         </div>
       </EditorContextProvider>

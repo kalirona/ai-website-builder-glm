@@ -8,6 +8,7 @@ import {
   ChevronUp,
   ChevronDown,
   GripVertical,
+  Sparkles,
 } from "lucide-react"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
@@ -28,7 +29,7 @@ export function NodeWrapper({
   isCanvas: boolean
   children: React.ReactNode
 }) {
-  const { selectedId, select, nodes } = useEditorContext()
+  const { selectedId, select, nodes, previewNodeId } = useEditorContext()
   const removeNode = useEditorStore((s) => s.removeNode)
   const duplicateNode = useEditorStore((s) => s.duplicateNode)
   const moveNode = useEditorStore((s) => s.moveNode)
@@ -148,6 +149,14 @@ export function NodeWrapper({
           <ToolbarBtn onClick={handleDelete} title="Delete" danger>
             <Trash2 className="h-3.5 w-3.5" />
           </ToolbarBtn>
+        </div>
+      )}
+
+      {/* AI Preview indicator (Phase 2.8) */}
+      {previewNodeId === nodeId && !isRoot && (
+        <div className="pointer-events-none absolute right-2 top-2 z-20 flex items-center gap-1 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
+          <Sparkles className="h-3 w-3" />
+          AI Preview
         </div>
       )}
 

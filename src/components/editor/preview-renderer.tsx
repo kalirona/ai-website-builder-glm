@@ -81,6 +81,7 @@ export function PreviewRenderer({
               select: () => {},
               updateProps: () => {},
               selectedId: null,
+              previewNodeId: null,
             }}
           >
             <NodeRenderer nodeId={editorData.rootId} />

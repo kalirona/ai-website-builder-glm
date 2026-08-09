@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
-import { Layers, Component, FileText, ChevronRight, ChevronDown } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Layers, Component, FileText, ChevronRight, ChevronDown, Search } from "lucide-react"
 import { listComponentsByCategory, getComponent } from "@/lib/editor/registry"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
 import { PaletteItem } from "./palette-item"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { Node } from "@/lib/editor/types"
 
@@ -67,16 +68,53 @@ export function LeftSidebar({
 }
 
 function ComponentsTab() {
+  const [query, setQuery] = useState("")
   const groups = listComponentsByCategory()
   const labels: Record<string, string> = {
-    layout: "Layout",
-    content: "Content",
-    media: "Media",
+    layout: "Elements",
+    content: "Elements",
+    media: "Elements",
     marketing: "Sections",
   }
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return groups
+    const q = query.toLowerCase()
+    const out: Record<string, typeof groups[string]> = {}
+    for (const [cat, defs] of Object.entries(groups)) {
+      const matched = defs.filter(
+        (d) =>
+          d.name.toLowerCase().includes(q) ||
+          d.type.toLowerCase().includes(q) ||
+          (d.description ?? "").toLowerCase().includes(q)
+      )
+      if (matched.length > 0) out[cat] = matched
+    }
+    return out
+  }, [query, groups])
+
+  const hasResults = Object.values(filtered).some((d) => d.length > 0)
+
   return (
-    <div className="space-y-4 p-3">
-      {Object.entries(groups).map(([cat, defs]) =>
+    <div className="space-y-3 p-3">
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search components…"
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
+
+      {!hasResults && (
+        <p className="py-6 text-center text-xs text-muted-foreground">
+          No components match &quot;{query}&quot;
+        </p>
+      )}
+
+      {Object.entries(filtered).map(([cat, defs]) =>
         defs.length === 0 ? null : (
           <div key={cat}>
             <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -95,40 +133,75 @@ function ComponentsTab() {
 }
 
 function LayersTab() {
-  const { nodes, rootId, select, selectedId } = useEditorContext()
+  const { nodes, select, selectedId } = useEditorContext()
+  const rootId = useEditorStore((s) => s.rootId)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  const toggle = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const renderNode = (node: Node, depth: number) => {
     const def = getComponent(node.type)
     const isRoot = node.parent === null
     const Icon = def?.icon
     const isSelected = selectedId === node.id
+    const hasChildren = node.children.length > 0
+    const isCollapsed = collapsed.has(node.id)
+
     return (
       <div key={node.id}>
-        <button
-          onClick={() => select(node.id)}
+        <div
           className={cn(
-            "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs transition",
+            "group flex items-center gap-1 rounded px-1 py-1 text-left text-xs transition",
             isSelected
               ? "bg-primary/10 text-primary"
               : "hover:bg-muted text-foreground"
           )}
-          style={{ paddingLeft: depth * 12 + 6 }}
+          style={{ paddingLeft: depth * 14 + 4 }}
         >
-          {Icon ? (
-            <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          {/* Expand/collapse toggle */}
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggle(node.id)
+              }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+            </button>
           ) : (
-            <span className="h-3.5 w-3.5" />
+            <span className="w-4 shrink-0" />
           )}
-          <span className="truncate">
-            {isRoot ? "Page" : def?.name ?? node.type}
-          </span>
-          {!isRoot && node.children.length > 0 && (
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {node.children.length}
+          {/* Select on click */}
+          <button
+            type="button"
+            onClick={() => select(node.id)}
+            className="flex min-w-0 flex-1 items-center gap-1.5"
+          >
+            {Icon ? (
+              <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            ) : (
+              <span className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span className="truncate">
+              {isRoot ? "Page" : def?.name ?? node.type}
             </span>
-          )}
-        </button>
-        {node.children.map((cid) => nodes[cid] && renderNode(nodes[cid], depth + 1))}
+          </button>
+        </div>
+        {!isCollapsed &&
+          node.children.map((cid) => nodes[cid] && renderNode(nodes[cid], depth + 1))}
       </div>
     )
   }

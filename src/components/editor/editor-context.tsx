@@ -11,6 +11,8 @@ export interface EditorContextValue {
   select: (id: string | null) => void
   updateProps: (id: string, patch: Record<string, unknown>) => void
   selectedId: string | null
+  /** nodeId currently being AI-previewed, or null (Phase 2.8). */
+  previewNodeId: string | null
 }
 
 const noop = () => {}
@@ -23,6 +25,7 @@ const PreviewContextValue: EditorContextValue = {
   select: noop,
   updateProps: noop,
   selectedId: null,
+  previewNodeId: null,
 }
 
 const EditorContext = createContext<EditorContextValue>(PreviewContextValue)

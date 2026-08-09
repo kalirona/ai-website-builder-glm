@@ -14,7 +14,6 @@ import {
   applySectionMerge,
   type PatchTreeNode,
 } from "./node-ops"
-
 // Re-exported for client convenience. Server code should import from
 // "@/lib/editor/node-ops" directly (this module is "use client").
 export { createBlankEditorData } from "./node-ops"
@@ -36,6 +35,9 @@ interface EditorStoreState {
   // history
   past: EditorData[]
   future: EditorData[]
+  // AI preview (Phase 2.8) — temporary, NEVER creates history or dirty state.
+  // When set, the canvas renders a virtual overlay of this patch on the node.
+  previewPatch: { nodeId: string; patch: SectionEditOutput } | null
   // meta
   hydrated: boolean
 
@@ -60,6 +62,10 @@ interface EditorStoreState {
    * malformed patch). Never persists. (Phase 2.5)
    */
   applySectionPatch: (nodeId: string, patch: SectionEditOutput) => boolean
+  /** Set a temporary AI preview patch. Does NOT modify nodes/history/dirty. */
+  setPreviewPatch: (nodeId: string, patch: SectionEditOutput) => void
+  /** Clear the temporary AI preview. Does NOT modify nodes/history/dirty. */
+  clearPreviewPatch: () => void
   undo: () => void
   redo: () => void
   canUndo: () => boolean
@@ -82,6 +88,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   projectId: null,
   past: [],
   future: [],
+  previewPatch: null,
   hydrated: false,
 
   load: (projectId, slug, data, tokens) => {
@@ -94,6 +101,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       selectedId: null,
       past: [],
       future: [],
+      previewPatch: null,
       dirty: false,
       hydrated: true,
     })
@@ -247,6 +255,15 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       future: [],
     })
     return true
+  },
+
+  setPreviewPatch: (nodeId, patch) => {
+    // Temporary preview — NO history, NO dirty, NO node mutation.
+    set({ previewPatch: { nodeId, patch } })
+  },
+
+  clearPreviewPatch: () => {
+    set({ previewPatch: null })
   },
 
   undo: () => {

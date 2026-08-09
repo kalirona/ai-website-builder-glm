@@ -613,3 +613,38 @@ Stage Summary:
 - Apply failure: applySectionPatch returns false → dialog stays open, amber error shown, no history entry.
 - Undo/Redo: uses existing editor undo/redo; one Apply = exactly one history entry; verified undo restores original, redo restores AI version.
 - No Phase 2.8 (visual preview) implemented.
+
+---
+Task ID: 2.8
+Agent: orchestrator
+Task: Phase 2.8 — Visual AI Preview + Editor UX Improvement (Layers, Breadcrumb, Add search). No architecture change.
+
+Work Log:
+- Store (store.ts): added previewPatch state + setPreviewPatch/clearPreviewPatch actions. NO history, NO dirty, NO node mutation. Cleared on load.
+- EditorContext (editor-context.tsx): added previewNodeId to context value + default.
+- Canvas (canvas.tsx): computes renderNodes via useMemo — overlays previewPatch using the SAME applySectionMerge used by Apply (so preview === what Apply produces). Real nodes never mutated. Passes renderNodes + previewNodeId to context. Added breadcrumb bar at top of canvas.
+- Breadcrumb (breadcrumb.tsx, NEW): shows parent chain of selected node (Page / Hero / Container / Heading). Clicking a parent selects it. Uses existing node.parent relationships.
+- NodeWrapper (node-wrapper.tsx): added "✨ AI Preview" violet badge at top-right of previewed node. Reads previewNodeId from context.
+- AI Assistant (ai-assistant.tsx): on Generate success → setPreviewPatch(nodeId, patch); on Discard → clearPreviewPatch(); on close → clearPreviewPatch(); on Apply → clearPreviewPatch() THEN applySectionPatch(). Selection-safety effect: if selectedId changes away from requestedNodeId, clears preview + shows "Selection changed" error. Updated result UI to "✨ AI Preview" with "Your changes are previewed on the canvas." text.
+- Left Sidebar (left-sidebar.tsx): Layers tab — added expand/collapse (chevron toggles per node, state in local Set); visual nesting via padding; registry names + icons. Add tab — added search input that filters registered components by name/type/description; reorganized category labels (Sections / Elements). Fixed pre-existing rootId TS error (now reads from store).
+- Preview Renderer (preview-renderer.tsx): added previewNodeId: null to context (preview page has no AI preview).
+- Fixed pre-existing TS error in editor/[projectId]/page.tsx (removed fallback to partial page select that lacked editorData).
+
+Verification:
+- bunx tsc --noEmit: ALL CLEAN — 0 errors (including previously pre-existing errors now fixed).
+- bun run lint: 0 errors, 0 warnings.
+- Store-level preview test (20 assertions): 20/20 passed.
+  1. Preview set without mutating real nodes/dirty/history.
+  2. renderNodes overlay shows AI headline + preserves unmentioned props.
+  3. Clear preview restores original view, no history.
+  4. Apply = clear preview + applySectionPatch → real nodes change, dirty=true, exactly 1 history entry.
+  5. Undo restores exact original.
+  6. Redo restores AI version.
+  7. Preview with children replacement: render shows 2 new children, old child removed from render only; real nodes still have old child; merged props survive.
+
+Stage Summary:
+- Files created: src/components/editor/breadcrumb.tsx
+- Files modified: src/lib/editor/store.ts, src/components/editor/editor-context.tsx, src/components/editor/canvas.tsx, src/components/editor/node-wrapper.tsx, src/components/editor/ai-assistant.tsx, src/components/editor/left-sidebar.tsx, src/components/editor/preview-renderer.tsx, src/app/editor/[projectId]/page.tsx
+- NodeRenderer remained the source of truth — it reads from context's nodes (which is now renderNodes = preview overlay). No second rendering system.
+- Architecture unchanged: Zustand + flat node map + registry + @dnd-kit + NodeRenderer + Zod + AIProvider + applySectionPatch + existing undo/redo + existing Save + existing auth + existing Prisma.
+- No Phase 2.9 / AI Add Section implemented.

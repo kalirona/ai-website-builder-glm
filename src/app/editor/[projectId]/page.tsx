@@ -68,10 +68,9 @@ export default async function EditorPage({
     pages.push({ slug: p.slug, name: p.name })
   }
 
-  const homePage =
-    (await db.page.findUnique({
-      where: { websiteId_slug: { websiteId: website.id, slug: "home" } },
-    })) ?? website.pages?.find((p) => p.slug === "home")
+  const homePage = await db.page.findUnique({
+    where: { websiteId_slug: { websiteId: website.id, slug: "home" } },
+  })
 
   const editorData = homePage
     ? safeParse<EditorData>(homePage.editorData, createBlankEditorData())
