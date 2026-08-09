@@ -41,12 +41,13 @@ export default function RegisterPage() {
       })
       if (signInRes?.error) {
         toast.error("Account created. Please sign in.")
-        router.push("/login")
+        window.location.href = "/login"
         return
       }
       toast.success("Account created!")
-      router.push("/dashboard")
-      router.refresh()
+      // Hard navigation so the server reliably sees the new session cookie
+      // through the gateway/proxy (avoids redirect loops).
+      window.location.href = "/dashboard"
     } catch {
       toast.error("Something went wrong")
       setLoading(false)

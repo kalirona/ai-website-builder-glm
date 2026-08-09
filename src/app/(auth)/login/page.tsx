@@ -35,8 +35,11 @@ export default function LoginPage() {
         return
       }
       toast.success("Welcome back!")
-      router.push(callbackUrl)
-      router.refresh()
+      // Hard navigation (not router.push) — forces a full page load so the
+      // server reliably sees the freshly-set session cookie. router.push can
+      // race the cookie through the gateway/proxy and cause a redirect loop
+      // (/dashboard -> /login -> /dashboard ...).
+      window.location.href = callbackUrl
     } catch {
       toast.error("Something went wrong")
       setLoading(false)
