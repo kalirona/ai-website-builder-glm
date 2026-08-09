@@ -576,3 +576,40 @@ Stage Summary:
 - Undo/redo: exactly ONE history entry per apply; undo restores pre-patch; redo restores patch; rejections add no history.
 - Validation: root/parent-null reject, node-exists, type-match, no AI id/parent fields, no duplicate ids, no cycles.
 - No persistence (no API calls). No design-token changes. No UI.
+
+---
+Task ID: 2.7
+Agent: orchestrator
+Task: Phase 2.7 — Connect Apply/Discard buttons in AI Assistant to existing applySectionPatch store action. UI-only change.
+
+Work Log:
+- Modified ONLY src/components/editor/ai-assistant.tsx. No changes to provider/API/Prisma/NodeRenderer/node-ops/store/undo-redo.
+- Added applySectionPatch + select from useEditorStore; added toast from sonner (existing); added useRef import + Check/X icons.
+- Added requestedNodeIdRef + requestedNodeTypeRef to capture which node the AI request was for (selection safety).
+- handleGenerate: captures nodeId + node.type into refs at request start; sets loading; calls API; stores result.
+- handleApply: (1) verifies requestedId/requestedType still match the live node (selection safety); (2) verifies patch.node.type matches; (3) calls applySectionPatch(requestedId, result) as-is; (4) on false → sets applyError "These changes could not be applied..." and does NOT close dialog; (5) on true → select(requestedId), toast.success "AI changes applied", clears state + closes dialog. No API save.
+- handleDiscard: clears result + applyError, returns to instruction state. No editor/history/save changes.
+- handleClose: same safe discard behavior.
+- Replaced "Apply will be added next" placeholder with [Apply Changes (primary, Check icon)] [Discard (outline, X icon)] buttons + amber apply-error box.
+
+Verification:
+- bunx tsc --noEmit: ai-assistant.tsx 0 errors.
+- bun run lint: 0 errors, 0 warnings.
+- Store-level smoke test (21 assertions, pure store via getState): 21/21 passed.
+  A Apply: returns true, headline changed, subheadline preserved, selectedId unchanged, dirty=true, past +1 exactly, future cleared.
+  C Undo: exact original headline + subheadline restored, future=1.
+  D Redo: AI headline restored, future=0.
+  E Wrong-type patch: returns false, no history entry, headline unchanged.
+  F Root patch: returns false, no history entry.
+  B Discard: editor props + history unchanged.
+  Selection-safety: stale-node patch returns false, no history entry.
+- Browser end-to-end test timed out in the sandbox (dev-server lifecycle + AI gen ~20s + agent-browser harness flakiness). Store-level tests cover all required scenarios.
+
+Stage Summary:
+- Files modified: src/components/editor/ai-assistant.tsx (only).
+- Apply: calls existing applySectionPatch(nodeId, patch) as-is → one history entry → dirty → no auto-save → dialog closes → toast "AI changes applied" → selectedId preserved.
+- Discard: clears temp patch, returns to instruction state, no editor/history/save changes, dialog stays open.
+- Selection safety: requestedNodeId/Type captured at generate time; apply verifies live node still matches; stale patch rejected with "Selection changed. Generate this change again for the current section."
+- Apply failure: applySectionPatch returns false → dialog stays open, amber error shown, no history entry.
+- Undo/Redo: uses existing editor undo/redo; one Apply = exactly one history entry; verified undo restores original, redo restores AI version.
+- No Phase 2.8 (visual preview) implemented.

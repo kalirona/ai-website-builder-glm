@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Sparkles, Loader2, Wand2, AlertCircle } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Sparkles, Loader2, Wand2, AlertCircle, Check, X } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { useEditorStore } from "@/lib/editor/store"
 import { getComponent } from "@/lib/editor/registry"
 import type { SectionEditOutput } from "@/lib/ai/section-schemas"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 /**
@@ -104,6 +105,8 @@ export function AiAssistant() {
   const projectId = useEditorStore((s) => s.projectId)
   const nodes = useEditorStore((s) => s.nodes)
   const selectedId = useEditorStore((s) => s.selectedId)
+  const applySectionPatch = useEditorStore((s) => s.applySectionPatch)
+  const select = useEditorStore((s) => s.select)
 
   // Prefer the explicitly-requested node; fall back to the current selection.
   const nodeId = openNodeId ?? selectedId
@@ -112,8 +115,16 @@ export function AiAssistant() {
 
   const [instruction, setInstruction] = useState("")
   const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [result, setResult] = useState<SectionEditOutput | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
+
+  // Selection safety: capture which node the AI request was for. If the user
+  // changes selection while the request is in flight, we refuse to apply the
+  // stale patch to the newly-selected component.
+  const requestedNodeIdRef = useRef<string | null>(null)
+  const requestedNodeTypeRef = useRef<string | null>(null)
 
   const open = !!nodeId && !!node && node.parent !== null
 
@@ -121,9 +132,14 @@ export function AiAssistant() {
   useEffect(() => {
     setResult(null)
     setError(null)
+    setApplyError(null)
     // keep the current instruction so the user can tweak + retry, but clear
     // it when the dialog fully closes (nodeId becomes null).
-    if (!nodeId) setInstruction("")
+    if (!nodeId) {
+      setInstruction("")
+      requestedNodeIdRef.current = null
+      requestedNodeTypeRef.current = null
+    }
   }, [nodeId])
 
   const handleGenerate = async () => {
@@ -131,8 +147,13 @@ export function AiAssistant() {
     const trimmed = instruction.trim()
     if (trimmed.length < 3 || loading) return
 
+    // Capture the node this request is for, so apply can verify it later.
+    requestedNodeIdRef.current = nodeId
+    requestedNodeTypeRef.current = node.type
+
     setLoading(true)
     setError(null)
+    setApplyError(null)
     setResult(null)
     try {
       const res = await fetch(
@@ -153,7 +174,7 @@ export function AiAssistant() {
         return
       }
       // The server returns { patch: { mode, node, summary } }, already
-      // Zod-validated. Store it temporarily; do NOT apply in this phase.
+      // Zod-validated. Store it temporarily for review (Phase 2.6).
       setResult(data.patch as SectionEditOutput)
     } catch {
       setError("Network error. Please try again.")
@@ -162,13 +183,79 @@ export function AiAssistant() {
     }
   }
 
+  const handleApply = () => {
+    if (!result || applying) return
+    const requestedId = requestedNodeIdRef.current
+    const requestedType = requestedNodeTypeRef.current
+
+    // Selection safety: verify the currently-selected node still matches the
+    // one the AI generated the patch for. If the user changed selection while
+    // the request was running, refuse to apply the stale patch.
+    if (!requestedId || !requestedType) {
+      setApplyError("Selection changed. Generate this change again for the current section.")
+      return
+    }
+    const current = nodes[requestedId]
+    if (!current || current.type !== requestedType) {
+      setApplyError("Selection changed. Generate this change again for the current section.")
+      return
+    }
+    // Also verify the patch's node type matches (defense in depth — the store
+    // action checks this too, but we want to surface the error here rather
+    // than silently failing).
+    if (result.node.type !== requestedType) {
+      setApplyError("Selection changed. Generate this change again for the current section.")
+      return
+    }
+
+    setApplying(true)
+    setApplyError(null)
+    // Use the existing store action as-is. It returns false on rejection
+    // (root/type-mismatch/malformed) and creates exactly ONE history entry
+    // on success. It does NOT persist — existing Save handles that.
+    const ok = applySectionPatch(requestedId, result)
+    setApplying(false)
+
+    if (!ok) {
+      // Do NOT close the dialog. No history entry was created.
+      setApplyError("These changes could not be applied. Your current design is safe.")
+      return
+    }
+
+    // Success: keep the edited component selected, clear the temp patch,
+    // close the dialog. The store action already preserved selectedId, but
+    // we re-select to be explicit.
+    select(requestedId)
+    toast.success("AI changes applied", {
+      description: "Press Undo to revert.",
+    })
+    setOpenNodeId(null)
+    setResult(null)
+    setError(null)
+    setApplyError(null)
+    setInstruction("")
+    requestedNodeIdRef.current = null
+    requestedNodeTypeRef.current = null
+  }
+
+  const handleDiscard = () => {
+    // Discard the temporary patch; return to the instruction state so the
+    // user can generate again. No editor/history/save changes.
+    setResult(null)
+    setApplyError(null)
+  }
+
   const handleClose = (openState: boolean) => {
     if (!openState) {
-      // Closing: discard the temporary patch + reset. No editor changes.
+      // Closing: discard the temporary patch + reset. No editor changes,
+      // no history, no save. Same safe behavior as Discard.
       setOpenNodeId(null)
       setResult(null)
       setError(null)
+      setApplyError(null)
       setInstruction("")
+      requestedNodeIdRef.current = null
+      requestedNodeTypeRef.current = null
     }
   }
 
@@ -269,23 +356,58 @@ export function AiAssistant() {
 
           {/* Result */}
           {result && (
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <Sparkles className="h-3 w-3 text-primary" />
-                AI suggestion
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Sparkles className="h-3 w-3 text-primary" />
+                  AI suggestion
+                </div>
+                <p className="text-sm leading-relaxed">{result.summary}</p>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <Badge variant="secondary" className="text-[11px]">
+                    {def?.name ?? node?.type} section updated
+                  </Badge>
+                  <Badge variant="outline" className="text-[11px]">
+                    Mode: Merge
+                  </Badge>
+                </div>
               </div>
-              <p className="text-sm leading-relaxed">{result.summary}</p>
-              <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <Badge variant="secondary" className="text-[11px]">
-                  {def?.name ?? node?.type} section updated
-                </Badge>
-                <Badge variant="outline" className="text-[11px]">
-                  Mode: Merge
-                </Badge>
+
+              {/* Apply-error (selection changed or store rejection) */}
+              {applyError && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 p-2.5 text-xs dark:bg-amber-950/30">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  <p className="text-amber-800 dark:text-amber-200">{applyError}</p>
+                </div>
+              )}
+
+              {/* Apply / Discard actions */}
+              <div className="flex gap-2 pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleApply}
+                  disabled={applying}
+                  className="flex-1"
+                >
+                  {applying ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Apply Changes
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDiscard}
+                  disabled={applying}
+                >
+                  <X className="mr-1.5 h-3.5 w-3.5" />
+                  Discard
+                </Button>
               </div>
-              <p className="pt-1 text-[11px] text-muted-foreground">
-                Apply will be added next.
-              </p>
             </div>
           )}
         </div>
