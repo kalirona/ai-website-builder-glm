@@ -648,3 +648,42 @@ Stage Summary:
 - NodeRenderer remained the source of truth — it reads from context's nodes (which is now renderNodes = preview overlay). No second rendering system.
 - Architecture unchanged: Zustand + flat node map + registry + @dnd-kit + NodeRenderer + Zod + AIProvider + applySectionPatch + existing undo/redo + existing Save + existing auth + existing Prisma.
 - No Phase 2.9 / AI Add Section implemented.
+
+---
+Task ID: 2.9
+Agent: orchestrator
+Task: Phase 2.9 — Production UX Polish & Reliability Audit. Small, focused fixes only.
+
+Problems found (concrete, not speculative):
+1. Stale selectedId after undo/redo: undo/redo swapped nodes but didn't validate selectedId against the restored nodes map. If the selected node was created by a now-undone action (or deleted by a now-redone action), selectedId dangled — pointing to a non-existent node. Right panel handled it gracefully (showed "No selection") but the dangling id was a reliability smell.
+2. Layers: ancestors of a selected node didn't auto-expand. If a user collapsed a Container in Layers, then selected its child Heading via canvas/breadcrumb, the Heading was invisible in the Layers tree with no way to navigate to it.
+3. Layers: selected node wasn't scrolled into view when off-screen (e.g. selected via canvas click on a node far down the page).
+
+Files changed:
+- src/lib/editor/store.ts: undo() and redo() now validate selectedId against the restored nodes map; if the selected node no longer exists, selectedId is cleared to null. No new history entry from this validation.
+- src/components/editor/left-sidebar.tsx: LayersTab now (a) computes the selected node's ancestor chain via existing parent relationships and treats those nodes as always-expanded (auto-expand), (b) scrolls the selected row into view via a ref + useEffect on selectedId, (c) adds a subtle ring-1 ring-primary/30 to the selected row for clearer visual selection.
+
+Verification:
+- bunx tsc --noEmit: ALL CLEAN — 0 errors.
+- bun run lint: 0 errors, 0 warnings.
+- Store-level test (11 assertions with registry populated): 11/11 passed.
+  - addNode → undo: new node removed, stale selectedId cleared to null.
+  - delete selected → undo: selection cleared on delete, node returns on undo.
+  - selection preserved across undo/redo when the node still exists.
+
+Items audited and found correct (no change needed):
+- Selection: canvas background deselects (onClick select(null) + stopPropagation on canvas content); toolbar actions stopPropagation; AI Preview badge is pointer-events-none; deleted selected node clears selection (removeNode sets null).
+- Responsive: device switching doesn't touch selectedId; responsive style values are stored as {desktop,tablet,mobile} objects and resolved per-device — editing mobile doesn't overwrite desktop (verified in Phase 1); AI preview respects active device (renderNodes overlay uses the same device from context).
+- AI preview: generate→preview→discard→original; preview→select-another→clears; preview→apply→one history entry. All verified in Phase 2.8 store tests, unchanged.
+- Undo/redo combinations (manual→AI→undo→redo; AI→manual→undo→redo; preview→discard→undo; apply→delete→undo): all follow the existing history contract (one snapshot per mutation, future cleared on new mutation).
+- Save/reload: editor state persists via PUT /api/pages with editorData JSON; reload reads it back. Verified in Phase 1 + 2.4 API tests.
+- Performance: no measurable unnecessary rerenders identified. Canvas uses useMemo for renderNodes overlay; NodeRenderer/NodeWrapper read from context. No premature memoization added.
+
+Remaining risks:
+- Browser end-to-end testing limited by sandbox dev-server lifecycle (server dies between tool calls). Store-level tests cover the logic deterministically.
+- No new features added (per scope). Templates/publishing/n8n/Directus/payments/AI-Add-Section explicitly excluded.
+
+Stage Summary:
+- Files modified: src/lib/editor/store.ts, src/components/editor/left-sidebar.tsx
+- Files created: none
+- 3 concrete problems fixed. Architecture unchanged. No framework/rewrite.

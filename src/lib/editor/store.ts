@@ -272,9 +272,17 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const previous = state.past[state.past.length - 1]
     const past = state.past.slice(0, -1)
     const current: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    // Validate selection against the restored nodes — if the selected node
+    // no longer exists (e.g. it was created by the now-undone action), clear
+    // it so we never carry a dangling selectedId.
+    const restoredSelected =
+      state.selectedId && previous.nodes[state.selectedId]
+        ? state.selectedId
+        : null
     set({
       nodes: previous.nodes,
       rootId: previous.rootId,
+      selectedId: restoredSelected,
       past,
       future: [current, ...state.future].slice(0, HISTORY_LIMIT),
       dirty: true,
@@ -287,9 +295,15 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const next = state.future[0]
     const future = state.future.slice(1)
     const current: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    // Same validation as undo: the redone state may not contain the selected node.
+    const restoredSelected =
+      state.selectedId && next.nodes[state.selectedId]
+        ? state.selectedId
+        : null
     set({
       nodes: next.nodes,
       rootId: next.rootId,
+      selectedId: restoredSelected,
       past: [...state.past, current].slice(-HISTORY_LIMIT),
       future,
       dirty: true,

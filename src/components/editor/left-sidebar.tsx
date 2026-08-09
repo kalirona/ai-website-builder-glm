@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { Layers, Component, FileText, ChevronRight, ChevronDown, Search } from "lucide-react"
 import { listComponentsByCategory, getComponent } from "@/lib/editor/registry"
 import { useEditorStore } from "@/lib/editor/store"
@@ -137,6 +137,28 @@ function LayersTab() {
   const rootId = useEditorStore((s) => s.rootId)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
+  // Compute the ancestor chain of the selected node so we can auto-expand
+  // them — a selected node must always be visible in the Layers tree, even if
+  // the user collapsed its parent earlier. Uses existing parent relationships.
+  const selectedAncestors = useMemo(() => {
+    const chain = new Set<string>()
+    if (!selectedId) return chain
+    let cur: string | null = selectedId
+    let guard = 0
+    while (cur && guard < 50) {
+      const n = nodes[cur]
+      if (!n) break
+      if (n.parent) chain.add(n.parent)
+      cur = n.parent
+      guard++
+    }
+    return chain
+  }, [selectedId, nodes])
+
+  // A node is considered expanded if it's NOT in the collapsed set OR it's an
+  // ancestor of the selected node (auto-expand).
+  const isExpanded = (id: string) => !collapsed.has(id) || selectedAncestors.has(id)
+
   const toggle = (id: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -146,21 +168,30 @@ function LayersTab() {
     })
   }
 
-  const renderNode = (node: Node, depth: number) => {
+  // Scroll the selected row into view whenever selection changes.
+  const selectedRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (selectedId && selectedRef.current) {
+      selectedRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    }
+  }, [selectedId])
+
+  const renderNode = (node: Node, depth: number): React.ReactNode => {
     const def = getComponent(node.type)
     const isRoot = node.parent === null
     const Icon = def?.icon
     const isSelected = selectedId === node.id
     const hasChildren = node.children.length > 0
-    const isCollapsed = collapsed.has(node.id)
+    const expanded = isExpanded(node.id)
 
     return (
       <div key={node.id}>
         <div
+          ref={isSelected ? selectedRef : undefined}
           className={cn(
             "group flex items-center gap-1 rounded px-1 py-1 text-left text-xs transition",
             isSelected
-              ? "bg-primary/10 text-primary"
+              ? "bg-primary/10 text-primary ring-1 ring-primary/30"
               : "hover:bg-muted text-foreground"
           )}
           style={{ paddingLeft: depth * 14 + 4 }}
@@ -175,10 +206,10 @@ function LayersTab() {
               }}
               className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
             >
-              {isCollapsed ? (
-                <ChevronRight className="h-3 w-3" />
-              ) : (
+              {expanded ? (
                 <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
               )}
             </button>
           ) : (
@@ -200,7 +231,7 @@ function LayersTab() {
             </span>
           </button>
         </div>
-        {!isCollapsed &&
+        {expanded &&
           node.children.map((cid) => nodes[cid] && renderNode(nodes[cid], depth + 1))}
       </div>
     )
