@@ -1,0 +1,243 @@
+"use client"
+
+import { create } from "zustand"
+import type { EditorData, Node, Device, DesignTokens } from "./types"
+import { defaultDesignTokens } from "./types"
+import {
+  cloneEditorData,
+  makeNode,
+  addNode,
+  removeNode,
+  moveNode,
+  duplicateNode,
+} from "./node-ops"
+
+// Re-exported for client convenience. Server code should import from
+// "@/lib/editor/node-ops" directly (this module is "use client").
+export { createBlankEditorData } from "./node-ops"
+import { getComponent } from "./registry"
+
+const HISTORY_LIMIT = 50
+
+interface EditorStoreState {
+  // document
+  nodes: Record<string, Node>
+  rootId: string
+  // editor ui
+  selectedId: string | null
+  device: Device
+  designTokens: DesignTokens
+  dirty: boolean
+  pageSlug: string
+  projectId: string | null
+  // history
+  past: EditorData[]
+  future: EditorData[]
+  // meta
+  hydrated: boolean
+
+  // actions
+  load: (projectId: string, slug: string, data: EditorData, tokens: DesignTokens) => void
+  serialize: () => EditorData
+  setDevice: (d: Device) => void
+  setDesignTokens: (tokens: DesignTokens) => void
+  select: (id: string | null) => void
+
+  addNode: (type: string, parentId: string, index?: number) => string | null
+  insertNode: (type: string, parentId: string, index?: number) => string | null
+  removeNode: (id: string) => void
+  moveNode: (id: string, newParentId: string, index?: number) => void
+  duplicateNode: (id: string) => void
+  updateProps: (id: string, patch: Record<string, unknown>) => void
+  updateStyles: (id: string, patch: Record<string, unknown>) => void
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
+  markSaved: () => void
+}
+
+function snapshot(state: { nodes: Record<string, Node>; rootId: string }): EditorData {
+  return cloneEditorData({ nodes: state.nodes, rootId: state.rootId })
+}
+
+export const useEditorStore = create<EditorStoreState>((set, get) => ({
+  nodes: {},
+  rootId: "root",
+  selectedId: null,
+  device: "desktop",
+  designTokens: defaultDesignTokens,
+  dirty: false,
+  pageSlug: "home",
+  projectId: null,
+  past: [],
+  future: [],
+  hydrated: false,
+
+  load: (projectId, slug, data, tokens) => {
+    set({
+      projectId,
+      pageSlug: slug,
+      nodes: data.nodes,
+      rootId: data.rootId,
+      designTokens: tokens,
+      selectedId: null,
+      past: [],
+      future: [],
+      dirty: false,
+      hydrated: true,
+    })
+  },
+
+  serialize: () => {
+    const { nodes, rootId } = get()
+    return { nodes, rootId }
+  },
+
+  setDevice: (d) => set({ device: d }),
+
+  setDesignTokens: (tokens) => {
+    const { past, nodes, rootId } = get()
+    set({
+      past: [...past, snapshot({ nodes, rootId })].slice(-HISTORY_LIMIT),
+      designTokens: tokens,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  select: (id) => set({ selectedId: id }),
+
+  addNode: (type, parentId, index) => {
+    const def = getComponent(type)
+    if (!def) return null
+    const state = get()
+    const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    const node = makeNode(type, { props: def.defaultProps, styles: def.defaultStyles }, parentId)
+    const { nodes, id } = addNode(data, node, parentId, index)
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      selectedId: id,
+      dirty: true,
+      future: [],
+    })
+    return id
+  },
+
+  // alias for clarity in the UI
+  insertNode: (type, parentId, index) => get().addNode(type, parentId, index),
+
+  removeNode: (id) => {
+    const state = get()
+    if (id === state.rootId) return
+    const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    const nodes = removeNode(data, id)
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      selectedId: state.selectedId === id ? null : state.selectedId,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  moveNode: (id, newParentId, index) => {
+    const state = get()
+    const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    const nodes = moveNode(data, id, newParentId, index)
+    if (nodes === state.nodes) return
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  duplicateNode: (id) => {
+    const state = get()
+    const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    const { nodes, newId } = duplicateNode(data, id)
+    if (!newId) return
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      selectedId: newId,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  updateProps: (id, patch) => {
+    const state = get()
+    const existing = state.nodes[id]
+    if (!existing) return
+    const node: Node = {
+      ...existing,
+      props: { ...existing.props, ...patch },
+      children: [...existing.children],
+    }
+    const nodes = { ...state.nodes, [id]: node }
+    // lightweight history: snapshot before first edit in a burst? We snapshot every change for simplicity.
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  updateStyles: (id, patch) => {
+    const state = get()
+    const existing = state.nodes[id]
+    if (!existing) return
+    const node: Node = {
+      ...existing,
+      styles: { ...existing.styles, ...patch },
+      children: [...existing.children],
+    }
+    const nodes = { ...state.nodes, [id]: node }
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
+      nodes,
+      dirty: true,
+      future: [],
+    })
+  },
+
+  undo: () => {
+    const state = get()
+    if (state.past.length === 0) return
+    const previous = state.past[state.past.length - 1]
+    const past = state.past.slice(0, -1)
+    const current: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    set({
+      nodes: previous.nodes,
+      rootId: previous.rootId,
+      past,
+      future: [current, ...state.future].slice(0, HISTORY_LIMIT),
+      dirty: true,
+    })
+  },
+
+  redo: () => {
+    const state = get()
+    if (state.future.length === 0) return
+    const next = state.future[0]
+    const future = state.future.slice(1)
+    const current: EditorData = { nodes: state.nodes, rootId: state.rootId }
+    set({
+      nodes: next.nodes,
+      rootId: next.rootId,
+      past: [...state.past, current].slice(-HISTORY_LIMIT),
+      future,
+      dirty: true,
+    })
+  },
+
+  canUndo: () => get().past.length > 0,
+  canRedo: () => get().future.length > 0,
+
+  markSaved: () => set({ dirty: false }),
+}))

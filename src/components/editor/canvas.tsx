@@ -1,0 +1,172 @@
+"use client"
+
+import { useState } from "react"
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core"
+import { useEditorStore } from "@/lib/editor/store"
+import { EditorContextProvider } from "./editor-context"
+import { NodeRenderer } from "./node-renderer"
+import { tokensToCssVars, deviceWidth } from "@/lib/editor/design-tokens"
+import { getComponent } from "@/lib/editor/registry"
+import { isDescendant } from "@/lib/editor/node-ops"
+import { cn } from "@/lib/utils"
+
+/**
+ * The editor canvas. Sets up the editor context, design-token CSS vars,
+ * the responsive viewport, and the DnD context for moving/adding nodes.
+ */
+export function EditorCanvas() {
+  const nodes = useEditorStore((s) => s.nodes)
+  const rootId = useEditorStore((s) => s.rootId)
+  const device = useEditorStore((s) => s.device)
+  const designTokens = useEditorStore((s) => s.designTokens)
+  const selectedId = useEditorStore((s) => s.selectedId)
+  const select = useEditorStore((s) => s.select)
+  const updateProps = useEditorStore((s) => s.updateProps)
+  const addNode = useEditorStore((s) => s.addNode)
+  const moveNode = useEditorStore((s) => s.moveNode)
+  const hydrated = useEditorStore((s) => s.hydrated)
+
+  const [activeDrag, setActiveDrag] = useState<
+    | { kind: "palette"; type: string }
+    | { kind: "node"; nodeId: string }
+    | null
+  >(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  )
+
+  const width = deviceWidth(device)
+  const data = { nodes, rootId }
+
+  const handleDragStart = (e: DragStartEvent) => {
+    const id = String(e.active.id)
+    if (id.startsWith("palette:")) {
+      setActiveDrag({ kind: "palette", type: id.replace("palette:", "") })
+    } else if (id.startsWith("node:")) {
+      setActiveDrag({ kind: "node", nodeId: id.replace("node:", "") })
+    }
+  }
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    setActiveDrag(null)
+    const activeId = String(e.active.id)
+    const overId = e.over ? String(e.over.id) : null
+    if (!overId || !overId.startsWith("drop:")) return
+
+    const targetNodeId = overId.replace("drop:", "")
+    const target = nodes[targetNodeId]
+    if (!target) return
+    const targetDef = getComponent(target.type)
+    const targetIsCanvas = !!targetDef?.isCanvas
+
+    // Palette drag → add a new node
+    if (activeId.startsWith("palette:")) {
+      const type = activeId.replace("palette:", "")
+      if (targetIsCanvas) {
+        addNode(type, targetNodeId)
+      } else if (target.parent) {
+        const parent = nodes[target.parent]
+        const idx = parent.children.indexOf(targetNodeId)
+        addNode(type, parent.id, idx + 1)
+      } else {
+        addNode(type, rootId)
+      }
+      return
+    }
+
+    // Existing node drag → move it
+    if (activeId.startsWith("node:")) {
+      const draggedId = activeId.replace("node:", "")
+      if (draggedId === targetNodeId) return
+      if (targetNodeId === rootId) {
+        moveNode(draggedId, rootId)
+        return
+      }
+      // can't move into own descendant
+      if (isDescendant(data, targetNodeId, draggedId)) return
+
+      if (targetIsCanvas) {
+        moveNode(draggedId, targetNodeId)
+      } else if (target.parent) {
+        const parent = nodes[target.parent]
+        let idx = parent.children.indexOf(targetNodeId) + 1
+        // if dragging within same parent and currently before target,
+        // removal shifts target left, so decrease by 1
+        if (parent.id === nodes[draggedId]?.parent) {
+          const curIdx = parent.children.indexOf(draggedId)
+          if (curIdx < idx - 1) idx -= 1
+        }
+        moveNode(draggedId, parent.id, idx)
+      }
+    }
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading canvas…
+      </div>
+    )
+  }
+
+  return (
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveDrag(null)}
+    >
+      <EditorContextProvider
+        value={{
+          editable: true,
+          device,
+          designTokens,
+          nodes,
+          select,
+          updateProps,
+          selectedId,
+        }}
+      >
+        <div
+          className="flex h-full w-full justify-center overflow-auto bg-slate-100 p-4 sm:p-8"
+          onClick={() => select(null)}
+        >
+          <div
+            className={cn(
+              "shadow-xl transition-all duration-200",
+              width ? "rounded-xl" : "rounded-xl w-full max-w-[1280px]"
+            )}
+            style={{
+              width: width ? `${width}px` : "100%",
+              maxWidth: width ? `${width}px` : "1280px",
+              background: designTokens.background,
+              ...tokensToCssVars(designTokens),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <NodeRenderer nodeId={rootId} />
+          </div>
+        </div>
+      </EditorContextProvider>
+
+      <DragOverlay dropAnimation={null}>
+        {activeDrag ? (
+          <div className="rounded-md border bg-white px-3 py-2 text-xs font-medium shadow-lg">
+            {activeDrag.kind === "palette"
+              ? `Add ${activeDrag.type}`
+              : `Move ${getComponent(nodes[activeDrag.nodeId]?.type ?? "")?.name ?? "component"}`}
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  )
+}

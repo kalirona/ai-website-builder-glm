@@ -1,0 +1,450 @@
+# AI Website Builder SaaS — Architecture & Work Log
+
+---
+Task ID: 0
+Agent: orchestrator
+Task: Produce architecture document (sections A–I) before coding
+
+Work Log:
+- Inspected existing repository (Next.js 16, React 19, TS5, Tailwind4, shadcn/ui New York, Prisma6+SQLite, NextAuth v4 installed, @dnd-kit, zustand, framer-motion, zod, z-ai-web-dev-sdk all available)
+- Authored architecture overview, folder structure, data model, editor architecture, registry, AI abstraction, API routes, phase plan, risks
+
+Stage Summary:
+- Architecture baseline set. See sections A–I below. Build proceeds phase-by-phase.
+
+---
+
+# A. Architecture Overview
+
+**Core principle:** The source of truth is a structured page schema, never AI-generated HTML/JS.
+
+```
+User intent ──► AI Provider ──► validated NodeSchema ──► Editor Store (Zustand)
+                                                              │
+                                   ┌──────────────────────────┼───────────────────────┐
+                                   ▼                          ▼                       ▼
+                          Visual Editor Canvas        Right Property Panel       Save → DB (JSON)
+                                   │                                                  │
+                                   ▼                                                  ▼
+                          Preview Mode (same renderer)                      Published Website (same renderer)
+```
+
+Layers:
+1. **Data layer** — Prisma + SQLite. Projects, Websites, Pages store editor state as a serialized JSON `nodes` document. User/Account/Session managed by NextAuth.
+2. **API layer** — Next.js Route Handlers under `src/app/api`. Every project/website route is owner-scoped (authorization check on every request).
+3. **AI layer** — `AIProvider` interface + `ZAIProvider` (z-ai-web-dev-sdk) adapter. Returns JSON validated against zod schemas. Provider is swappable.
+4. **Editor engine** — Custom Craft.js-inspired engine (Zustand store): flat node map, selection, history (undo/redo), actions (add/move/delete/duplicate/update), serialization. React 19 compatible (Craft.js itself has React-19 risk; documented in §I).
+5. **Component registry** — Declarative registry mapping `type → { render, settings, defaults, allowedChildren }`. Extensible without touching the editor.
+6. **Renderer** — Single `<NodeRenderer>` used by editor canvas, preview mode, and (future) published site. Renders a node tree from the schema. This guarantees WYSIWYG across contexts.
+7. **Presentation** — App Router pages: `/` (landing), `/login`, `/register`, `/dashboard`, `/editor/[projectId]`, `/preview/[projectId]`.
+
+# B. Folder Structure
+
+```
+src/
+├── app/
+│   ├── layout.tsx                  # root: providers, fonts
+│   ├── globals.css                 # design tokens (light/dark)
+│   ├── page.tsx                    # landing (auth-aware redirect)
+│   ├── (auth)/
+│   │   ├── login/page.tsx
+│   │   └── register/page.tsx
+│   ├── dashboard/page.tsx          # projects + create-website (AI)
+│   ├── editor/[projectId]/page.tsx # visual editor
+│   ├── preview/[projectId]/page.tsx
+│   └── api/
+│       ├── auth/[...nextauth]/route.ts
+│       ├── projects/route.ts            # GET(list) POST(create)
+│       ├── projects/[id]/route.ts       # GET PATCH DELETE
+│       ├── projects/[id]/generate/route.ts   # POST AI generate website
+│       ├── websites/[projectId]/route.ts     # GET upsert website
+│       └── pages/[projectId]/route.ts        # GET/PUT page editor state
+├── components/
+│   ├── ui/                         # shadcn (existing)
+│   ├── editor/
+│   │   ├── editor-shell.tsx        # resizable panel layout
+│   │   ├── top-bar.tsx
+│   │   ├── left-sidebar.tsx        # components / layers / pages tabs
+│   │   ├── canvas.tsx              # renders NodeRenderer + selection + dnd
+│   │   ├── node-renderer.tsx       # THE single renderer (editor + preview)
+│   │   ├── node-wrapper.tsx        # selection outline + inline edit + dnd handle
+│   │   ├── right-panel.tsx         # property/style/advanced tabs
+│   │   ├── controls/               # text, textarea, color, select, slider, toggle, responsive-field
+│   │   └── inline-text.tsx         # contentEditable inline editing
+│   ├── website/                    # the 12 user components (registry entries)
+│   │   ├── section.tsx container.tsx heading.tsx text.tsx button.tsx image.tsx
+│   │   ├── hero.tsx features.tsx testimonials.tsx cta.tsx navbar.tsx footer.tsx
+│   │   └── index.ts                # registry assembly
+│   └── shared/                     # app logo, buttons, etc.
+├── lib/
+│   ├── db.ts                       # prisma client (existing)
+│   ├── auth.ts                     # nextauth config + helpers
+│   ├── auth-guard.ts               # getCurrentUser, requireUser
+│   ├── editor/
+│   │   ├── types.ts                # Node, EditorState, etc.
+│   │   ├── store.ts                # zustand editor store + history
+│   │   ├── registry.ts             # component registry + helpers
+│   │   ├── node-ops.ts             # pure tree operations (add/move/remove/dup)
+│   │   ├── serialize.ts            # nodes <-> JSON, schema validation
+│   │   └── design-tokens.ts        # global design system tokens + resolver
+│   ├── ai/
+│   │   ├── provider.ts             # AIProvider interface
+│   │   ├── zai-provider.ts         # z-ai-web-dev-sdk implementation
+│   │   ├── prompts.ts              # prompt builders
+│   │   └── schemas.ts              # zod schemas for AI output validation
+│   └── utils.ts                    # cn (existing) + slug + id gen
+└── hooks/
+    ├── use-mobile.ts (existing)
+    └── use-debounce.ts
+```
+
+# C. Data Model
+
+**Prisma (SQLite):**
+
+```prisma
+model User { id, email(unique), name?, passwordHash, createdAt, updatedAt, projects[] }
+model Account { ... nextauth oauth (unused for creds but kept) }
+model Session { ... nextauth jwt sessions (kept for compat) }
+model VerificationToken { ... }
+
+model Project {
+  id           String   @id @default(cuid())
+  ownerId      String
+  owner        User     @relation(...)
+  name         String
+  slug         String
+  description  String?
+  businessType String?
+  status       String   @default("draft")   // draft|generating|ready|published
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  website      Website?
+  @@unique([ownerId, slug])
+}
+
+model Website {
+  id           String   @id @default(cuid())
+  projectId    String   @unique
+  project      Project  @relation(...)
+  name         String
+  domain       String?
+  logo         String?
+  favicon      String?
+  globalStyles Json     // design tokens
+  theme        String   @default("light")
+  navigation   Json     // nav items
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  pages        Page[]
+}
+
+model Page {
+  id          String   @id @default(cuid())
+  websiteId   String
+  website     Website  @relation(...)
+  name        String
+  slug        String
+  title       String?
+  description String?
+  seo         Json?    // {title,description,ogImage}
+  editorData  Json     // { nodes: Record<id,Node>, rootId }  ← source of truth
+  status      String   @default("draft")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([websiteId, slug])
+}
+```
+
+**Node (the editor source-of-truth, stored in `Page.editorData`):**
+
+```ts
+type Responsive<T> = { desktop: T; tablet?: T; mobile?: T };
+interface Node {
+  id: string;
+  type: string;                 // registry key, e.g. "Hero"
+  props: Record<string, any>;   // content: heading, buttonText...
+  styles: Record<string, any>;  // responsive + style: fontSize, bg, padding...
+  children: string[];           // ordered child node ids
+  parent: string | null;
+}
+interface EditorData { nodes: Record<string, Node>; rootId: string; }
+```
+
+# D. Editor Architecture
+
+**Store (Zustand)** — `editorStore`:
+- State: `nodes`, `rootId`, `selectedId`, `device`, `history` (past/future snapshots), `dirty`, `website`, `page`.
+- Actions: `load(data)`, `serialize()`, `addNode(type, parentId, index?)`, `removeNode(id)`, `moveNode(id, newParent, index)`, `duplicateNode(id)`, `updateProps(id, patch)`, `updateStyles(id, patch)`, `select(id)`, `undo()`, `redo()`, `setDevice(d)`.
+- **History:** before every mutating action, push a deep-cloned snapshot of `nodes` to `past` (cap 50). Undo pops past→future, etc. Uses structuredClone.
+- **Selection:** `selectedId` references a node; NodeWrapper renders outline + toolbar when selected.
+- **DnD:** `@dnd-kit` for reordering children within a container and moving nodes between containers. Drag from the component palette (left sidebar) creates a new node.
+- **Inline editing:** contentEditable on Heading/Text/Button labels; on blur, commits to store (debounced) and syncs right panel.
+
+**NodeRenderer** — the single renderer. Recursively walks `nodes` from `rootId`, looks up `registry[type].render`, passes `props`/`styles`/`children`. Used by:
+- Editor canvas (wrapped in NodeWrapper for selection)
+- Preview mode (no wrappers)
+- Future published site
+
+**Design tokens:** `globalStyles` on Website holds `{ primary, secondary, accent, background, foreground, muted, border, radius, headingFont, bodyFont }`. The canvas root injects these as CSS variables; components consume `var(--brand-primary)` etc. Changing the token updates the whole site.
+
+# E. Component Registry Architecture
+
+```ts
+interface ComponentDefinition<P = any> {
+  type: string;                       // unique, e.g. "Hero"
+  name: string;                       // human label
+  icon: LucideIcon;
+  category: 'layout'|'content'|'media'|'marketing';
+  isCanvas?: boolean;                 // can contain children (Section, Container)
+  allowedChildren?: string[] | '*';   // constraint
+  defaultProps: P;
+  defaultStyles: Record<string, any>;
+  render: (p: RenderProps<P>) => ReactNode;   // pure, consumes design tokens
+  settings: SettingsField[];          // drives the right panel UI
+}
+interface SettingsField {
+  key: string;                        // props.* or styles.*
+  label: string;
+  group: 'content'|'layout'|'style'|'typography';
+  type: 'text'|'textarea'|'color'|'select'|'slider'|'toggle'|'image'|'responsive-text';
+  options?: {label,value}[];
+  min?,max?,step?;
+  responsive?: boolean;               // show desktop/tablet/mobile tabs
+  placeholder?: string;
+}
+```
+
+The right panel iterates `registry[type].settings` and renders the matching control. **Adding a component = adding one file + one registry entry.** No editor changes needed.
+
+# F. AI Abstraction Architecture
+
+```ts
+interface AIProvider {
+  generateWebsite(input: GenerateWebsiteInput): Promise<GenerateWebsiteOutput>;
+  generateSection(input: SectionEditInput): Promise<Node>;        // phase 2
+  rewriteContent(input): Promise<Partial<Node['props']>>;         // phase 2
+  generateSEO(input): Promise<SEO>;                                // phase 2
+}
+```
+- `ZAIProvider` implements this via `z-ai-web-dev-sdk` (backend only).
+- Prompts force **strict JSON** matching the node schema. Output is parsed and validated against zod schemas (`websiteSchema`, `nodeSchema`) before touching the store.
+- AI never returns HTML/JS. It returns a validated `EditorData` (nodes tree) which the renderer consumes.
+- The frontend calls our API (`/api/projects/[id]/generate`); the backend calls the provider. Swappable to n8n/OpenAI/Gemini later by implementing the interface.
+
+# G. API Route List
+
+| Method | Route | Purpose |
+|---|---|---|
+| * | `/api/auth/[...nextauth]` | NextAuth (login/register/session) |
+| GET | `/api/projects` | list current user's projects |
+| POST | `/api/projects` | create project (+ optional AI generate) |
+| GET | `/api/projects/[id]` | get one project (owner-checked) |
+| PATCH | `/api/projects/[id]` | rename/desc/status |
+| DELETE | `/api/projects/[id]` | delete project + website + pages |
+| POST | `/api/projects/[id]/generate` | AI generate website → pages |
+| GET | `/api/websites/[projectId]` | get website + pages summary |
+| GET | `/api/pages/[projectId]?slug=home` | get page editor data |
+| PUT | `/api/pages/[projectId]?slug=home` | save editor data |
+
+All project/website/page routes call `requireUser()` then verify `project.ownerId === user.id`.
+
+# H. Phase-by-Phase Implementation Plan
+
+**Phase 1 (this build):**
+1. Prisma schema → db:push
+2. NextAuth (credentials) + auth lib + guards
+3. Core types + design tokens + registry interface
+4. 12 components + settings schemas + registry assembly
+5. Editor store (nodes, selection, history, actions, serialize)
+6. NodeRenderer + NodeWrapper (selection, inline edit)
+7. Editor UI shell: top bar, left sidebar (components/layers/pages), canvas, right panel
+8. Responsive preview + preview page
+9. API routes (projects, websites, pages)
+10. AI provider (ZAI) + generate-website feature + schema validation
+11. Auth UI + Dashboard + Landing
+12. Providers wiring + dev server + Agent Browser verification
+
+**Phase 2 (later, not now):** AI section editing, templates, design-system editor UI, inline image generation, publishing, n8n/directus integration, billing.
+
+# I. Risks & Architectural Decisions
+
+1. **Craft.js vs custom engine.** Craft.js relies on React internals that changed in React 19 (the project is on React 19). Risk of runtime breakage and hard-to-debug editor issues. **Decision:** build a custom Craft.js-inspired engine (flat node map, connectors, query/actions) on Zustand + @dnd-kit. This preserves the architecture's intent (structured editing, component registry, extensible) while removing version risk and giving full control over the schema-as-source-of-truth invariant. The engine API mirrors Craft.js concepts so a future migration is feasible.
+2. **SQLite JSON storage.** `editorData` stored as JSON String (SQLite has no native JSON column type in Prisma; `Json` maps to TEXT). Acceptable for MVP scale. Phase 2 can move to Postgres with indexed JSONB.
+3. **AI output safety.** AI returns JSON only, validated by zod, never executed. Props are rendered through React components (no `dangerouslySetInnerHTML` for AI content). Inline text uses contentEditable with store commits (no raw HTML insertion).
+4. **Multi-tenancy / authorization.** Every data route verifies ownership. No cross-user access by ID tampering. Slugs are unique per-owner.
+5. **NextAuth credentials + JWT.** No OAuth in MVP; credentials provider with scrypt-hashed passwords (Node crypto, no extra deps). JWT sessions (stateless) via NextAuth.
+6. **Responsive storage.** Responsive style values stored as `{desktop,tablet,mobile}` objects on `node.styles`. Renderer resolves per active device. Avoids duplicating the whole tree per breakpoint.
+7. **Scope discipline.** Billing, collaboration, custom domains, templates UI, n8n/directus deployment are explicitly excluded from Phase 1 per spec §20. Abstractions (AIProvider, WebsitePublisher interface) are scaffolded but not fully wired to external infra.
+
+---
+Task ID: 5
+Agent: full-stack-developer (components)
+Task: Build 12 website components + registry assembly
+
+Work Log:
+- Read existing infrastructure: types.ts (ComponentDefinition/RenderProps/SettingsField/Node), registry.ts (registerComponent/getComponent/listComponents), design-tokens.ts (resolveResponsive/tokensToCssVars/deviceWidth), editor-context.tsx, inline-text.tsx (InlineText — contentEditable wrapper).
+- Confirmed available design-token CSS vars: --brand-primary/secondary/accent/background/foreground/muted/border/radius/heading-font/body-font.
+- Created src/components/website/icon-picker.tsx — maps 45+ icon-name strings (sparkles, shield, trending-up, …) to lucide-react icons via pickIcon(name) with iconNames export.
+- Created src/components/website/responsive.ts — small typed helper `rs(value, device, fallback)` wrapping resolveResponsive<string> to avoid `unknown` seeping into CSSProperties (Record<string,unknown> → string cast in one place).
+- Extended src/components/editor/inline-text.tsx (additive, backward compatible) with an optional `style?: React.CSSProperties` prop that merges with the editable affordances ({ outline, cursor }) so components can pass dynamic typography inline styles (font-size, color, font-weight, line-height, letter-spacing, text-align) directly to the contentEditable element. Existing callers (no style) unaffected.
+- Built 12 ComponentDefinition files under src/components/website/:
+  - section.tsx (layout, isCanvas, allowedChildren="*") — full-width section + inner max-width padded container; styles.background/padding(max responsive)/maxWidth/minHeight.
+  - container.tsx (layout, isCanvas) — centered max-width + responsive padding.
+  - heading.tsx (content) — h1/h2/h3/h4 with InlineText, dynamic typography, alignment, level select.
+  - text.tsx (content) — paragraph w/ InlineText multiline, alignment, responsive font-size.
+  - button.tsx (content) — anchor styled by variant (primary/secondary/outline/ghost) + size (sm/md/lg); cursor + onClick noop in editable mode; InlineText label.
+  - image.tsx (media) — img with width/height/fit/radius; dashed muted placeholder when src empty.
+  - hero.tsx (marketing) — 2-col grid (text + image), eyebrow badge, headline, subheadline, primary+secondary buttons, image-position left/right/none, mobile single-column stack via ctx.device, gradient placeholder if no image.
+  - features.tsx (marketing) — centered header + responsive cards grid (1 mobile, ≤2 tablet, N desktop), icon circle, hover lift shadow, list of {icon,title,description}.
+  - testimonials.tsx (marketing) — header + responsive cards grid, quote mark, 5 stars (accent), avatar or initials fallback, divider, author/role, hover lift.
+  - cta.tsx (marketing) — centered primary-bg card with heading, subheadline, white-bg button; InlineText for all three texts; responsive padding.
+  - navbar.tsx (marketing) — sticky top bar, brand (logo image or initial-badge + InlineText brand name), center nav links (hidden on mobile), CTA button; hover color shifts.
+  - footer.tsx (marketing) — dark slate-900 (#0f172a) footer; brand + description + 3 social icons (Twitter/GitHub/LinkedIn) + N link columns; columns store links as `linksText` ("Label|url" per line) parsed via split('\n').split('|'); copyright bar with top border.
+- Created src/components/website/index.ts registry assembly — imports all 12 defs, registers each via registerComponent on module load (guarded by `registered` flag to be SSR-safe), re-exports defs + pickIcon/iconNames.
+- All components consume design tokens via `var(--brand-*)` so brand-color changes propagate everywhere; default text colors use slate-600 (#475569) and footer dark slate-900 (#0f172a) per spec.
+- Responsive design driven by ctx.device (mobile/tablet/desktop) — grids collapse, font sizes shrink, nav links hide on mobile.
+- Hover states on buttons, cards, links; subtle box-shadow lifts and color transitions (150-200ms ease).
+- All primary human-visible text fields (heading, text, button label, hero headline/subhead, cta heading/subhead/button, navbar brand) use InlineText; list items + secondary fields render plain text (right panel handles editing).
+- Ran `bun run lint` — initially 4 warnings about unused eslint-disable directives for @next/next/no-img-element (project's eslint config doesn't enforce that rule). Removed the 4 directives. Re-ran lint: 0 errors, 0 warnings, exit 0.
+- Ran `bunx tsc --noEmit` to verify types — found two issues: (1) resolveResponsive returning `unknown` because `styles.X as unknown` made T=unknown (CSSProperties fields rejected unknown); fixed by introducing the `rs()` typed helper in responsive.ts. (2) `ComponentDefinition<Props>` not assignable to `ComponentDefinition<Record<string, unknown>>` in the registry assembly array due to function-arg contravariance; fixed with `as unknown as ComponentDefinition` casts on each item. Final tsc result for src/components/website/*: 0 errors.
+
+Stage Summary:
+- Files created (15 total):
+  - src/components/website/section.tsx
+  - src/components/website/container.tsx
+  - src/components/website/heading.tsx
+  - src/components/website/text.tsx
+  - src/components/website/button.tsx
+  - src/components/website/image.tsx
+  - src/components/website/hero.tsx
+  - src/components/website/features.tsx
+  - src/components/website/testimonials.tsx
+  - src/components/website/cta.tsx
+  - src/components/website/navbar.tsx
+  - src/components/website/footer.tsx
+  - src/components/website/icon-picker.tsx (45+ icon-name → LucideIcon map + pickIcon + iconNames)
+  - src/components/website/responsive.ts (typed `rs()` wrapper around resolveResponsive)
+  - src/components/website/index.ts (registry assembly: imports all 12, registers via registerComponent, re-exports)
+- Files modified (additive, backward-compatible):
+  - src/components/editor/inline-text.tsx — added optional `style?: React.CSSProperties` prop, merged into both preview and edit-mode renders.
+- Key decisions:
+  - Components are pure (no editor-store imports); they receive props/styles/ctx/children via RenderProps and consume ctx.device for responsive layout, ctx.editable to disable navigation/active states.
+  - All marketing components resolve column counts from ctx.device (mobile=1, tablet≤2, desktop=N) rather than CSS media queries — required because the editor canvas is a fixed-width div inside the browser window so Tailwind breakpoints wouldn't reliably trigger.
+  - Footer columns store links as `linksText` ("Label|url\nLabel2|url2") parsed at render time — simpler than nested lists in the settings panel.
+  - Hero with imagePosition="none" renders single-column centered layout (no image column at all).
+  - Hero buttons and CTA buttons use `var(--brand-primary)` for primary variant; CTA's outer card uses primary background with white text + white-bg button for high contrast.
+  - Hover affordances (lift shadows, color shifts, opacity) are suppressed when ctx.editable to avoid distracting the editor.
+- Lint result: `bun run lint` → 0 errors, 0 warnings (exit 0).
+- Type check result: `bunx tsc --noEmit` → 0 errors in src/components/website/* (other folders' pre-existing errors are out of scope).
+- The registry is now populated on any module that side-effect-imports `@/components/website` (or any of its named exports). Next agents can call `getComponent("Hero")`, `listComponentsByCategory()`, etc.
+
+---
+Task ID: 10
+Agent: full-stack-developer (ai-service)
+Task: Build AI abstraction (provider interface, zod schemas, prompts, ZAI impl)
+
+Work Log:
+- Read worklog.md (architecture sections A–I + Task 5 component summary). Confirmed 12 registered component types (Navbar, Hero, Features, Testimonials, CTA, Footer, Heading, Text, Button, Image, Section, Container) and their exact prop shapes from the Task 5 entry. Confirmed editor Node shape `{ id, type, props, styles, children: string[], parent }` and EditorData `{ nodes: Record<id, Node>, rootId }` in `src/lib/editor/types.ts`. Confirmed `genId(prefix)` and `slugify()` in `src/lib/utils.ts`. Confirmed zod v4.3.5 + z-ai-web-dev-sdk v0.0.18 installed; verified `z.object().passthrough()` (deprecated but functional), `z.looseObject()`, `z.record(keyType, valueType)`, `z.lazy()` recursive pattern, and `.safeParse()` instance method all exist in v4.
+- Created `src/lib/ai/schemas.ts` — zod schemas:
+  - `GenerateWebsiteInput` interface (businessName, businessType, targetAudience?, services?, location?, stylePreference?, primaryGoal?).
+  - `designTokensSchema` — z.object with 8 required strings (primary/secondary/accent/background/foreground/muted/border/radius) + optional headingFont/bodyFont.
+  - `navItemSchema` — `{ label: string, url: string }`.
+  - `nodeSchema` — recursive `z.lazy(() => z.object({ type, props: z.record(z.string(), z.unknown()), styles?: record, children: z.array(nodeSchema) }).passthrough())` typed as `z.ZodType<AiTreeNode>`. `.passthrough()` keeps unknown keys (forward-compat for slightly-off AI output) while enforcing the required structure.
+  - `generatedPageSchema` — `{ name, slug, title?, description?, nodes: nodeSchema }` (root node is a nested tree, NOT flat).
+  - `generateWebsiteOutputSchema` — `{ websiteName, domain?, designTokens, navigation: navItem[], pages: generatedPage[] (min 1) }`.
+  - Inferred types exported (GenerateWebsiteOutput, DesignTokensOutput, NavItemOutput, GeneratedPageOutput).
+- Created `src/lib/ai/provider.ts` — interface + types + tree-flattening:
+  - `AiTreeNode` interface — `{ type, props: Record<string,unknown>, styles?: Record<string,unknown>, children: AiTreeNode[] }` (the nested shape the AI produces; co-located here per spec, imported as type into schemas.ts for the recursive zod type — type-only import avoids any runtime circular dep).
+  - `GeneratedPageResult`, `GenerateWebsiteResult` interfaces — fully-validated result with EditorData per page.
+  - `AIProvider` interface — `generateWebsite(input)` + phase-2 placeholders (`generateSection?`, `rewriteContent?`).
+  - `flattenTree(tree: AiTreeNode): EditorData` — walks the nested tree depth-first; assigns `"root"` to the page root (parent null); every other node gets `genId(type.toLowerCase())` (matching the convention in `node-ops.ts`); builds a flat `Record<id, Node>` where each Node has `{ id, type, props, styles: styles||{}, children: [childIds], parent }`. Returns `{ nodes, rootId: "root" }`. Helper `safePrefix()` sanitizes the type into a valid genId prefix (strips non-alphanumerics, falls back to "n").
+- Created `src/lib/ai/prompts.ts` — prompt builders:
+  - `buildGenerateWebsiteSystemPrompt()` — comprehensive prompt covering: output-format rules (JSON only, no fences/commentary), top-level JSON structure, design-tokens schema (with hex + cohesion guidance + business-appropriate palette examples), page object shape, recursive node structure, FULL component catalog (all 12 types with exact prop shapes and valid icon names list), Home page structure (Navbar → Section>Container>Hero → Section>Container>Features → Section>Container>Testimonials → Section>Container>CTA → Footer) with a literal tree skeleton, content-quality rules (no lorem ipsum, real specific copy, realistic testimonials, relevant footer columns), URL conventions, final reminder.
+  - `buildGenerateWebsiteUserPrompt(input)` — fills in business details (businessName + businessType always; targetAudience/services/location/stylePreference/primaryGoal included only when non-empty).
+- Created `src/lib/ai/zai-provider.ts` — ZAI implementation:
+  - `// server-only module` comment at top (no "use server" directive per spec; file is imported only by API route handlers).
+  - `ZAIProvider` class implementing `AIProvider.generateWebsite`:
+    1. Builds system + user prompts.
+    2. `await ZAI.create()` then `zai.chat.completions.create({ messages: [{role:"assistant", content: systemPrompt}, {role:"user", content: userPrompt}], thinking: { type: "disabled" } })` — note the assistant role for the system prompt per the SDK's API.
+    3. Extracts `completion.choices[0].message.content` (string; throws if empty/non-string).
+    4. `stripCodeFences()` — removes leading ```json/``` and trailing ``` with regex.
+    5. `parseJsonLoose()` — `JSON.parse` first; on failure, extracts substring from first `{` to last `}` and retries; throws with both error messages if both attempts fail.
+    6. Validates with `generateWebsiteOutputSchema.safeParse()`; on failure throws Error with all zod issues formatted as `path | message` lines + first 500 chars of cleaned response for debugging.
+    7. Maps validated data to `GenerateWebsiteResult` — fills `headingFont`/`bodyFont` defaults (`var(--font-geist-sans)`) when omitted; calls `flattenTree(page.nodes)` per page to produce `editorData`.
+  - `generateSection()` / `rewriteContent()` phase-2 stubs that throw "not implemented".
+  - Exports `aiProvider` singleton (`new ZAIProvider()`).
+- Verification:
+  - `cd /home/z/my-project && bunx tsc --noEmit 2>&1 | grep -E "src/lib/ai"` → NO OUTPUT (0 errors in src/lib/ai/*). Full tsc shows only pre-existing errors in `examples/` and `skills/` folders (out of scope, unrelated to this task).
+  - `bun run lint` → 0 errors, 0 warnings, exit 0.
+
+Stage Summary:
+- Files created (4 total, all under src/lib/ai/):
+  - `src/lib/ai/schemas.ts` — zod v4 schemas: designTokensSchema, navItemSchema, nodeSchema (recursive + passthrough), generatedPageSchema, generateWebsiteOutputSchema; GenerateWebsiteInput interface; inferred type exports.
+  - `src/lib/ai/provider.ts` — AiTreeNode type, GenerateWebsiteResult/GeneratedPageResult/AIProvider interfaces, flattenTree() function converting nested AI tree → flat id-based EditorData (root="root", child ids via genId(type.toLowerCase())).
+  - `src/lib/ai/prompts.ts` — buildGenerateWebsiteSystemPrompt() (full component catalog + page structure + content rules) and buildGenerateWebsiteUserPrompt(input) (business details, optional fields included only when non-empty).
+  - `src/lib/ai/zai-provider.ts` — ZAIProvider class (server-only module) implementing generateWebsite via z-ai-web-dev-sdk: system prompt as assistant role, thinking disabled, strip code fences, JSON.parse with first-{ to last-} retry, zod safeParse validation with detailed error reporting, design-token default-font fallback, per-page flattenTree mapping. Exports `aiProvider` singleton. Phase-2 stubs throw "not implemented".
+- Key decisions:
+  - Defined `AiTreeNode` in provider.ts (per spec) and imported it as a TYPE-ONLY import into schemas.ts — type-only imports are erased at compile time so there's no runtime circular dependency between the two modules (provider.ts runtime-imports GenerateWebsiteInput from schemas.ts; schemas.ts type-only-imports AiTreeNode from provider.ts).
+  - Used `z.lazy(() => z.object({...}).passthrough())` for the recursive nodeSchema. `.passthrough()` (deprecated in zod v4 but functional) keeps unknown props so a slightly-off AI response still loads rather than hard-failing; the required `type/props/styles/children` structure is still enforced. Typed as `z.ZodType<AiTreeNode>` to break the recursive type cycle.
+  - The AI produces a NESTED tree (children are full node objects). `flattenTree()` converts it to the flat id-based EditorData the editor store consumes. This separation lets the AI think in terms of intuitive parent→child composition while the editor's source-of-truth remains the flat map (which supports O(1) node lookup, simple move/duplicate ops, and clean serialization).
+  - System prompt uses role "assistant" (not "user") for the system message — per the documented z-ai-web-dev-sdk API. `thinking: { type: "disabled" }` to get direct JSON output without reasoning preamble.
+  - Two-stage JSON extraction: first try `JSON.parse(cleaned)`; if that fails, extract substring from first `{` to last `}` and retry. This handles models that prepend "Here is the result:" or append trailing commentary despite instructions.
+  - Validation errors include the full list of zod issues (path + message) AND the first 500 chars of the cleaned AI response — critical for debugging prompt issues during development.
+  - Did NOT add "use server" directive (per spec) — the file is imported only by server-side API route handlers. Added `// server-only module` comment as a convention marker.
+  - `designTokens` validated shape is cast to the editor's `DesignTokens` type with `headingFont`/`bodyFont` defaulted to `var(--font-geist-sans)` when the AI omits them (matches `defaultDesignTokens` in `src/lib/editor/types.ts`).
+- Sample AI output (what the system prompt elicits — verified by prompt structure):
+  ```json
+  {
+    "websiteName": "Acme Bakery",
+    "designTokens": { "primary":"#c2410c", "secondary":"#92400e", "accent":"#f59e0b", "background":"#fffbeb", "foreground":"#1c1917", "muted":"#fef3c7", "border":"#fde68a", "radius":"12px" },
+    "navigation": [ {"label":"Home","url":"#"}, {"label":"Menu","url":"#menu"}, {"label":"About","url":"#about"}, {"label":"Contact","url":"#contact"} ],
+    "pages": [{
+      "name":"Home","slug":"home",
+      "nodes": { "type":"Section","props":{},"children":[
+        {"type":"Navbar","props":{"brand":"Acme Bakery","logo":"","links":[...4...],"ctaText":"Order Now","ctaUrl":"#contact","sticky":true},"children":[]},
+        {"type":"Section","props":{},"children":[{"type":"Container","props":{},"children":[{"type":"Hero","props":{"eyebrow":"...","headline":"...","subheadline":"...","primaryButton":{...},"secondaryButton":{...},"image":"","imagePosition":"none","align":"center"},"children":[]}]}]},
+        ...Features/Testimonials/CTA each wrapped in Section>Container...
+        {"type":"Footer","props":{"brand":"Acme Bakery","description":"...","columns":[...],"copyright":"© 2024 Acme Bakery. All rights reserved."},"children":[]}
+      ]}
+    }]
+  }
+  ```
+- Type check result: `bunx tsc --noEmit` → 0 errors in src/lib/ai/* (only pre-existing errors in examples/ and skills/ folders, out of scope).
+- Lint result: `bun run lint` → 0 errors, 0 warnings (exit 0).
+- The AI abstraction is ready for the orchestrator to wire into `/api/projects/[id]/generate`. API route should: import `aiProvider` from `@/lib/ai/zai-provider`, call `generateWebsite(input)`, persist `designTokens` → `Website.globalStyles`, `navigation` → `Website.navigation`, and for each page `flattenTree` result → `Page.editorData`.
+
+---
+Task ID: FINAL
+Agent: orchestrator
+Task: Phase 1 implementation, integration, and end-to-end verification
+
+Work Log:
+- Built foundation: Prisma schema (User/Account/Session/VerificationToken/Project/Website/Page), NextAuth v4 credentials (scrypt hashing), auth guards, core editor types, design-token resolver, node-ops, registry, Zustand store (selection + undo/redo history + actions + serialization)
+- Delegated 12 website components + registry assembly to subagent (Task 5) — all lint-clean, consume design tokens, InlineText support
+- Delegated AI service (provider interface + ZAI impl + zod schemas + prompts + flattenTree) to subagent (Task 10)
+- Built editor UI: NodeRenderer (single renderer for editor+preview), NodeWrapper (selection/hover/DnD/toolbar), canvas (DnD context + device viewport + token CSS vars), left sidebar (Components/Layers/Pages), right panel (grouped settings + 9 control types incl. responsive + list), top bar (undo/redo/device/preview/save/publish), editor shell (resizable panels + keyboard shortcuts + page switching)
+- Built API: register, projects CRUD, generate (AI), websites, pages (save/load with validation)
+- Built pages: landing (auth-aware), login, register, dashboard (stats + project grid + AI create dialog), editor (server-loaded), preview (device toggle)
+- Fixed critical bug: createBlankEditorData was in "use client" store module → moved to server-safe node-ops.ts; updated all server imports
+- Fixed: missing create-website-dialog.tsx (directory created after first write); missing ChevronRight import; Root node rendered as bare container so page sections stack cleanly
+
+Verification (Agent Browser end-to-end):
+- Landing → register → login → dashboard: OK (real session, real DB)
+- "New Website" dialog → fill business details → AI Generate: OK (z-ai-web-dev-sdk, ~24s, validated JSON)
+- Redirect to editor with AI-generated 15-node website (Navbar/Hero/Features/Testimonials/CTA/Footer + Sections/Containers): OK
+- Canvas renders real AI copy ("Transform Your Small Business...", "Bloom Coffee Roasters" navbar, etc.)
+- Component selection → right panel shows grouped settings (Content/Layout/Style): OK
+- Device toggle (desktop/tablet/mobile): OK
+- Undo (Ctrl+Z) + Save (PUT /api/pages): OK
+- Preview page (/preview/[id]) renders same schema with device toggle: OK
+- No console/runtime errors
+- Vision analysis of editor screenshot: "highly professional and polished, modern minimalist design, clear typography hierarchy, cohesive color scheme"
+
+Stage Summary:
+- Phase 1 COMPLETE. Functioning visual website builder (not a mockup): AI generation → structured schema → visual editor → preview, all working.
+- Every implemented button performs a real action. No "Coming Soon" / TODO / fake functionality.
+- 12 components, 9 property control types, undo/redo, DnD + click-to-add, inline text editing, responsive preview, save/load, publish (status update), AI website generation with zod validation.
+- Architecture honors the core principle: structured schema is the source of truth (AI → schema → editor → published site all share NodeRenderer).
+- AI provider is swappable (AIProvider interface). Multi-tenancy enforced (owner check on every route).
+- Excluded per spec §20: billing, collaboration, custom domains, templates UI, n8n/directus deployment — abstractions only.

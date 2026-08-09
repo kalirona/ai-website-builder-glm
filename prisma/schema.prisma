@@ -1,0 +1,110 @@
+// Prisma schema for AI Website Builder SaaS
+// SQLite is used per environment constraints. JSON columns map to TEXT.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// A project represents one website owned by a user.
+model Project {
+  id           String    @id @default(cuid())
+  ownerId      String
+  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name         String
+  slug         String
+  description  String?
+  businessType String?
+  status       String    @default("draft") // draft | generating | ready | published
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  website      Website?
+
+  @@unique([ownerId, slug])
+}
+
+// Website = global settings + pages for a project.
+model Website {
+  id           String   @id @default(cuid())
+  projectId    String   @unique
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String
+  domain       String?
+  logo         String?
+  favicon      String?
+  globalStyles String   @default("{}") // JSON: design tokens
+  theme        String   @default("light")
+  navigation   String   @default("[]") // JSON: nav items
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  pages        Page[]
+}
+
+// Page = a single page; editorData holds the source-of-truth node tree (JSON).
+model Page {
+  id          String   @id @default(cuid())
+  websiteId   String
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  title       String?
+  description String?
+  seo         String?  // JSON
+  editorData  String   @default("{}") // JSON: { nodes, rootId }  ← source of truth
+  status      String   @default("draft")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([websiteId, slug])
+}
