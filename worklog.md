@@ -495,3 +495,41 @@ Stage Summary:
 - Provider implementation: COMPLETE and verified end-to-end against the live SDK.
 - Validation: every AI output validated via sectionEditOutputSchemaFor(input.nodeType) before return; never returns unvalidated data.
 - No API route, no store changes, no UI, no Prisma changes — all deferred per instructions.
+
+---
+Task ID: 2.4
+Agent: orchestrator
+Task: Phase 2.4 — Section-edit API endpoint (POST /api/projects/[id]/sections/[nodeId]/edit). No store/UI/preview/Prisma changes; existing generate endpoint untouched.
+
+Work Log:
+- Inspected existing data-access pattern in src/app/api/pages/[projectId]/route.ts (getOwnedPage, safeParse, defaultDesignTokens, NextResponse.json conventions) and reused the same patterns.
+- Created src/app/api/projects/[id]/sections/[nodeId]/edit/route.ts:
+  - Auth: getCurrentUser() → 401 if none.
+  - Ownership: separate existence check (404 if project absent) vs ownership check (403 if exists but not owned) per spec — distinguishes from the existing routes that return 404 for both.
+  - Body validation: instruction must be string, trimmed, 3–1000 chars → 400 otherwise. Invalid JSON body → 400.
+  - Loads website (404 if missing) + home page (404 if missing) using the project's existing websiteId_slug unique lookup.
+  - Parses editorData via safeParse; finds nodeId → 404 if absent; rejects root (nodeId===rootId OR parent===null) → 400.
+  - Builds SectionEditInput server-side ONLY: toNestedTreeNode (flat→nested, reads current state), designTokens from website.globalStyles, pageContext = sibling sections (type + heuristic heading, capped at 8), businessName from project name. Client supplies ONLY instruction — cannot spoof node state/tokens.
+  - Calls aiProvider.editSection (the abstraction, not ZAIProvider directly). Provider already Zod-validates incl. type preservation.
+  - Returns { patch } with HTTP 200. NO database mutation anywhere in the route.
+  - Provider failure → 500 with safe bounded message (≤800 chars), no keys/stack/response-blob leaks.
+
+Verification:
+- bunx tsc --noEmit: new route 0 errors. (2 pre-existing Phase-1 TS errors in editor page + left-sidebar remain, unchanged, unrelated.)
+- bun run lint: 0 errors, 0 warnings.
+- 8 API smoke tests (dev server, real DB, real AI): 8/8 passed.
+  1. valid Hero instruction → 200 + validated patch (AI rewrote headline coherently).
+  2. empty instruction → 400.
+  3. unknown node → 404.
+  4. root node → 400.
+  5. non-owner user → 403.
+  6. editorData byte-identical before vs after the edit call → NO DB mutation (confirms preview-only contract).
+  7. (bonus) unauthenticated → 401.
+  8. (bonus) patch shape: mode=merge, node.type=Hero preserved, no id/parent fields, summary present.
+
+Stage Summary:
+- Files created: src/app/api/projects/[id]/sections/[nodeId]/edit/route.ts (only).
+- Files modified: none.
+- Endpoint behavior: returns a validated, non-persisted patch. Client will later preview → apply → undo → save.
+- Security: authenticated, owner-checked (403 vs 404), node-exists, root-protected, client cannot spoof state, zero DB writes.
+- No store/UI/preview/Prisma changes. Existing generate endpoint untouched.
