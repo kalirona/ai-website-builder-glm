@@ -10,6 +10,10 @@ import { flattenTree } from "./provider"
 import type { GenerateWebsiteInput } from "./schemas"
 import { generateWebsiteOutputSchema } from "./schemas"
 import { buildGenerateWebsiteSystemPrompt, buildGenerateWebsiteUserPrompt } from "./prompts"
+import type { SectionEditInput, SectionEditOutput } from "./section-schemas"
+import { sectionEditOutputSchemaFor } from "./section-schemas"
+import { buildSectionEditSystemPrompt, buildSectionEditUserPrompt } from "./section-prompts"
+import { stripCodeFences, parseJsonLoose } from "./json-utils"
 
 /** Default font fallback when the AI omits headingFont/bodyFont. */
 const DEFAULT_HEADING_FONT = "var(--font-geist-sans)"
@@ -102,56 +106,68 @@ export class ZAIProvider implements AIProvider {
     }
   }
 
-  // Phase-2 placeholders — explicitly not implemented.
-  async generateSection(_input: unknown): Promise<unknown> {
-    throw new Error("generateSection: not implemented (Phase 2)")
+  /**
+   * Edit a single selected component in place (Phase 2.3).
+   *
+   * Calls the ZAI chat completions endpoint with the section-edit system +
+   * user prompts, then validates the response against the Phase 2.2 schema
+   * (including the type-preservation check via `sectionEditOutputSchemaFor`).
+   *
+   * Never returns unvalidated AI output. Throws with the zod issues if the
+   * response fails validation.
+   */
+  async editSection(input: SectionEditInput): Promise<SectionEditOutput> {
+    const systemPrompt = buildSectionEditSystemPrompt()
+    const userPrompt = buildSectionEditUserPrompt(input)
+
+    // 1. Call the ZAI chat completions endpoint.
+    //    Per the z-ai-web-dev-sdk API, the system prompt is sent with
+    //    role "assistant" (not "system") — same convention as generateWebsite.
+    const zai = await ZAI.create()
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: "assistant", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      thinking: { type: "disabled" },
+    })
+
+    // 2. Extract the text content.
+    const rawText: unknown = completion?.choices?.[0]?.message?.content
+    if (!rawText || typeof rawText !== "string") {
+      throw new Error("AI provider returned an empty or non-string response for editSection.")
+    }
+
+    // 3. Strip markdown code fences if present, then parse JSON (with retry).
+    const cleaned = stripCodeFences(rawText)
+    const parsed = parseJsonLoose(cleaned)
+
+    // 4. Validate against the section-edit schema, including the
+    //    type-preservation check. The factory builds a schema that rejects
+    //    outputs whose node.type !== input.nodeType.
+    const schema = sectionEditOutputSchemaFor(input.nodeType)
+    const result = schema.safeParse(parsed)
+    if (!result.success) {
+      const issues = result.error.issues
+        .map((issue) => {
+          const path = issue.path.length > 0 ? issue.path.join(".") : "(root)"
+          return `  - path: ${path} | message: ${issue.message}`
+        })
+        .join("\n")
+      throw new Error(
+        `AI section-edit output failed schema validation.\n` +
+          `Expected node type: ${input.nodeType}\n` +
+          `Issues:\n${issues}\n\n` +
+          `First 500 chars of cleaned response:\n${cleaned.slice(0, 500)}`
+      )
+    }
+
+    return result.data
   }
 
+  // Phase-2 placeholder — still not implemented.
   async rewriteContent(_input: unknown): Promise<unknown> {
     throw new Error("rewriteContent: not implemented (Phase 2)")
-  }
-}
-
-/**
- * Strip leading/trailing markdown code fences.
- * Handles ```json ... ``` and ``` ... ``` forms.
- */
-function stripCodeFences(text: string): string {
-  return text
-    .replace(/^\s*```(?:json|JSON)?\s*\n?/i, "")
-    .replace(/\n?\s*```\s*$/i, "")
-    .trim()
-}
-
-/**
- * Parse JSON with a single retry: if the first parse fails, extract the
- * substring from the first "{" to the last "}" and try again. This
- * handles models that wrap JSON in a sentence like "Here is the result: {...}".
- *
- * Throws if both attempts fail.
- */
-function parseJsonLoose(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch (firstErr) {
-    const start = text.indexOf("{")
-    const end = text.lastIndexOf("}")
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error(
-        `AI response is not valid JSON and contains no JSON object boundary. ` +
-          `First parse error: ${(firstErr as Error).message}`
-      )
-    }
-    const slice = text.slice(start, end + 1)
-    try {
-      return JSON.parse(slice)
-    } catch (secondErr) {
-      throw new Error(
-        `AI response is not valid JSON. ` +
-          `First parse error: ${(firstErr as Error).message}. ` +
-          `Second parse error (extracted {...}): ${(secondErr as Error).message}`
-      )
-    }
   }
 }
 

@@ -2,6 +2,7 @@
 
 import type { EditorData, Node, DesignTokens } from "@/lib/editor/types"
 import type { GenerateWebsiteInput } from "./schemas"
+import type { SectionEditInput, SectionEditOutput } from "./section-schemas"
 import { genId } from "@/lib/utils"
 
 /**
@@ -49,8 +50,13 @@ export interface GenerateWebsiteResult {
  */
 export interface AIProvider {
   generateWebsite(input: GenerateWebsiteInput): Promise<GenerateWebsiteResult>
-  // Phase-2 placeholders (not implemented in Phase 1):
-  generateSection?(input: unknown): Promise<unknown>
+  /**
+   * Edit a single selected component in place. Returns a validated
+   * structured patch (never HTML/JS, never editor ids) that the caller
+   * applies to the editor store. Implemented in Phase 2.3.
+   */
+  editSection(input: SectionEditInput): Promise<SectionEditOutput>
+  // Phase-2 placeholder (still not implemented):
   rewriteContent?(input: unknown): Promise<unknown>
 }
 

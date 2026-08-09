@@ -471,3 +471,27 @@ Stage Summary:
 - `bun run lint`: 0 errors, 0 warnings.
 - No test suite exists in the project; ran a throwaway runtime smoke test instead (cleaned up).
 - Phase 2.2 complete. Next phases (provider impl, API route, store action, UI) NOT started.
+
+---
+Task ID: 2.3
+Agent: orchestrator
+Task: Phase 2.3 — Implement AI provider section editing (editSection on AIProvider + ZAIProvider). No API route, no store, no UI.
+
+Work Log:
+- Created `src/lib/ai/json-utils.ts`: extracted `stripCodeFences()` + `parseJsonLoose()` verbatim from zai-provider.ts so both generateWebsite and editSection share one robust parser. No behavior change.
+- Created `src/lib/ai/section-prompts.ts`: `buildSectionEditSystemPrompt()` (strict-JSON, preserve type, no HTML/JS, no editor IDs, use only existing property keys, scale change to instruction) + `buildSectionEditUserPrompt(input)` (live component state + design tokens + optional sibling context + instruction).
+- Modified `src/lib/ai/provider.ts`: replaced throwing `generateSection?` placeholder with real `editSection(input: SectionEditInput): Promise<SectionEditOutput>` on the `AIProvider` interface. `rewriteContent?` left as placeholder. `generateWebsite` signature untouched.
+- Modified `src/lib/ai/zai-provider.ts`: implemented `editSection()` — calls zai.chat.completions.create (role "assistant" for system prompt, thinking disabled, same convention as generateWebsite), strips fences, parses JSON loosely, validates with `sectionEditOutputSchemaFor(input.nodeType)` (includes type-preservation + all Phase 2.2 safety checks). Throws with zod issues + first 500 chars on failure. Removed the now-duplicated local stripCodeFences/parseJsonLoose (imported from json-utils). generateWebsite body unchanged except it now imports the helpers.
+
+Verification:
+- `bunx tsc --noEmit`: ai/ module 0 errors. (2 pre-existing Phase-1 TS errors in editor page + left-sidebar remain, unchanged, unrelated.)
+- `bun run lint`: 0 errors, 0 warnings.
+- Real provider smoke test (Hero, instruction "Rewrite the headline to be more conversion focused"): 8/8 passed. AI returned valid JSON, mode=merge, node.type=Hero preserved, no editor id/parent fields, no HTML/JS in any string value, re-validates against sectionEditOutputSchemaFor("Hero"). Made a MINIMAL change: only headline changed ("Grow Your Business With Smart Marketing" → "Transform Your Marketing Into Revenue"), all other props/styles untouched — exactly the intended behavior for a small instruction.
+- Regression test: `generateWebsite` still works (24s, 15-node tree, valid tokens). Extraction of JSON helpers caused no behavioral change.
+
+Stage Summary:
+- Files created: src/lib/ai/json-utils.ts, src/lib/ai/section-prompts.ts
+- Files modified: src/lib/ai/provider.ts (interface), src/lib/ai/zai-provider.ts (impl + helper extraction)
+- Provider implementation: COMPLETE and verified end-to-end against the live SDK.
+- Validation: every AI output validated via sectionEditOutputSchemaFor(input.nodeType) before return; never returns unvalidated data.
+- No API route, no store changes, no UI, no Prisma changes — all deferred per instructions.
