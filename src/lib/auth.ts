@@ -9,19 +9,19 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
-  // NOTE: behind the gateway (Caddy), NextAuth v4 must trust the forwarded
-  // Host / X-Forwarded-Proto headers so it derives the correct public URL
-  // (https://preview-chat-*.space-z.ai) instead of localhost:3000. This is
-  // enabled via the AUTH_TRUST_HOST env var (see .env), NOT the `trustHost`
-  // option (that's NextAuth v5). Without it, the session cookie + callback
-  // redirect use localhost and the browser hits "redirected you too many
-  // times" through the proxy.
+  // CRITICAL (gateway/proxy fix):
+  // The app runs behind a Caddy gateway (HTTPS) but Next.js itself runs on
+  // http://localhost:3000. NextAuth v4's auto-detection of HTTPS via
+  // X-Forwarded-Proto causes it to set useSecureCookies=true, which (a)
+  // renames cookies to __Secure-/__Host- prefixes and (b) sets the Secure
+  // flag. Through the proxy this broke cookie storage and caused a
+  // "redirected you too many times" loop.
   //
-  // When AUTH_TRUST_HOST + HTTPS are detected, NextAuth auto-switches to
-  // __Host-/__Secure- prefixed cookies with the Secure flag. Those are
-  // stricter and can fail through some proxy setups, so we explicitly pin
-  // the standard cookie names (no prefix) with SameSite=Lax. The Secure flag
-  // is still set automatically when the request is HTTPS (via X-Forwarded-Proto).
+  // Fix: force useSecureCookies=false and pin standard (non-prefixed) cookie
+  // names with SameSite=Lax, secure:false. The gateway terminates TLS, so the
+  // cookie still travels over HTTPS to the browser — we just don't set the
+  // Secure flag, which is safe because the gateway guarantees HTTPS.
+  useSecureCookies: false,
   cookies: {
     sessionToken: {
       name: "next-auth.session-token",
@@ -29,7 +29,7 @@ export const authOptions: NextAuthOptions = {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production",
+        secure: false,
       },
     },
     csrfToken: {
@@ -38,7 +38,7 @@ export const authOptions: NextAuthOptions = {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production",
+        secure: false,
       },
     },
     callbackUrl: {
@@ -46,7 +46,7 @@ export const authOptions: NextAuthOptions = {
       options: {
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production",
+        secure: false,
       },
     },
   },
