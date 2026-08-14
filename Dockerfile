@@ -34,16 +34,18 @@ ENV HOSTNAME=0.0.0.0
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs --create-home nextjs
 
-# Copy the standalone server output (produced by `next build` with output: "standalone")
+# Copy the standalone server output (produced by `next build` with output: "standalone").
+# The standalone output already includes a minimal node_modules with the deps
+# the server needs at runtime (next, react, @prisma/client, z-ai-web-dev-sdk, etc).
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Prisma client + schema + prisma CLI (needed at runtime for the SQLite driver + migrations)
+# Prisma generated client (query engine) — NOT included in standalone output.
+# The prisma CLI is needed for `bunx prisma db push` at container start.
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/@bun ./node_modules/@bun
 COPY --from=builder /app/prisma ./prisma
 
 # Create the db directory (SQLite file lives here) + give the runner ownership
