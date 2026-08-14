@@ -130,3 +130,10 @@ With `AUTH_TRUST_HOST=true`, NextAuth will use these to compute the correct publ
 
 ### Port already in use
 - The Dockerfile exposes `3084`. Change `ports: - "3084:3084"` in compose to `"8080:3084"` if you need a different host port.
+
+### Prisma P1012: "The datasource property `url` is no longer supported in schema files"
+- **Cause:** The container's `CMD` was using `bunx prisma db push`, which downloads the **latest** Prisma (v7+). Prisma 7 removed `url` from the schema's datasource block, so the schema fails validation (P1012) before `db push` runs.
+- **Fix (already applied):** The Dockerfile now:
+  1. Copies the **full** `node_modules` from the builder (so the Prisma 6 CLI + its transitive deps are present in the runner).
+  2. Runs `bun node_modules/prisma/build/index.js db push` — invoking the **local** Prisma 6 CLI pinned by `package.json`/`bun.lock` instead of `bunx` downloading Prisma 7.
+- **If you see this again:** Confirm `package.json` still pins `prisma: ^6.x.x` and that you are not running `bunx prisma` or `npx prisma` anywhere (those will fetch the latest major).
