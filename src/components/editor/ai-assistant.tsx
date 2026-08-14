@@ -110,8 +110,12 @@ export function AiAssistant() {
   const setPreviewPatch = useEditorStore((s) => s.setPreviewPatch)
   const clearPreviewPatch = useEditorStore((s) => s.clearPreviewPatch)
 
-  // Prefer the explicitly-requested node; fall back to the current selection.
-  const nodeId = openNodeId ?? selectedId
+  // The dialog opens ONLY when explicitly requested via the Ask AI button
+  // (openNodeId is set). It does NOT auto-open just because a node is selected
+  // — otherwise it would pop up on add-section, drag, and every selection
+  // change, and could never be closed (closing sets openNodeId=null but
+  // selectedId is still set).
+  const nodeId = openNodeId
   const node = nodeId ? nodes[nodeId] : undefined
   const def = node ? getComponent(node.type) : undefined
 
@@ -128,7 +132,9 @@ export function AiAssistant() {
   const requestedNodeIdRef = useRef<string | null>(null)
   const requestedNodeTypeRef = useRef<string | null>(null)
 
-  const open = !!nodeId && !!node && node.parent !== null
+  // Open only when explicitly requested AND the node still exists AND it's not
+  // the root (root can't be AI-edited).
+  const open = !!openNodeId && !!node && node.parent !== null
 
   // Reset transient state whenever the target node changes or dialog closes.
   useEffect(() => {
@@ -443,6 +449,7 @@ export function AiAssistant() {
 
 /** The toolbar button that opens the assistant for a given node. */
 export function AskAiButton({ nodeId, disabled }: { nodeId: string; disabled?: boolean }) {
+  const select = useEditorStore((s) => s.select)
   return (
     <button
       type="button"
@@ -450,6 +457,10 @@ export function AskAiButton({ nodeId, disabled }: { nodeId: string; disabled?: b
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation()
+        // Select the node so the editor context reflects what's being edited,
+        // then open the assistant. The assistant opens ONLY because
+        // openAiAssistant sets openNodeId — selection alone must NOT open it.
+        select(nodeId)
         openAiAssistant(nodeId)
       }}
       onMouseDown={(e) => e.stopPropagation()}
