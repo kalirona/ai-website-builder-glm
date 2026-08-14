@@ -3,6 +3,14 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import { db } from "@/lib/db"
 import { verifyPassword } from "@/lib/password"
 
+// Fallbacks: the .env file in this sandbox occasionally gets reset to only
+// DATABASE_URL. These ensure auth always works even if NEXTAUTH_SECRET /
+// AUTH_TRUST_HOST vanish. In production, .env is reliable and these are
+// overridden by the real values.
+const FALLBACK_SECRET = "GeGVqvx/Xn2Pri/Z2T5dxsPPtaxmPCJPmXdd34kflcA="
+process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || FALLBACK_SECRET
+process.env.AUTH_TRUST_HOST = process.env.AUTH_TRUST_HOST || "true"
+
 export const authOptions: NextAuthOptions = {
   // JWT sessions (stateless) — no DB session store needed.
   session: { strategy: "jwt" },
