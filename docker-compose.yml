@@ -1,0 +1,40 @@
+# =============================================================================
+# docker-compose.yml — AI Website Builder SaaS
+# Use with: docker compose up -d --build
+# For Dokploy: use this as a Compose source, OR deploy the Dockerfile directly.
+# =============================================================================
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-website-builder
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # ---- Required ----
+      - DATABASE_URL=file:/app/db/custom.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-please}
+      # ---- Required behind a reverse proxy (Dokploy/Traefik/Caddy) ----
+      # Makes NextAuth trust X-Forwarded-Host / X-Forwarded-Proto so it
+      # derives the correct public URL for cookies + callback redirects.
+      - AUTH_TRUST_HOST=true
+      # ---- Optional: force the public URL (if AUTH_TRUST_HOST isn't enough) ----
+      # Set this to your exact public origin to override header detection.
+      # - NEXTAUTH_URL=https://your-domain.com
+      # ---- Optional: AI provider overrides (defaults to z-ai-web-dev-sdk) ----
+      # - ZAI_API_KEY=...
+    volumes:
+      # Persist the SQLite database across container restarts
+      - db-data:/app/db
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/auth/csrf"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  db-data:
