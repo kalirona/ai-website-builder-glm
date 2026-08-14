@@ -151,7 +151,7 @@ prisma/schema.prisma  (User, Account, Session, Project, Website, Page)
 ### To start the app
 ```bash
 cd /home/z/my-project
-bun run dev   # starts on port 3000
+bun run dev   # starts on port 3084
 ```
 Demo account: `demo@webcraft.test` / `demo123`
 

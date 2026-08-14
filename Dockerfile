@@ -27,7 +27,7 @@ FROM oven/bun:1 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=3084
 ENV HOSTNAME=0.0.0.0
 
 # Create a non-root user for security (Debian-based image uses groupadd/useradd)
@@ -53,7 +53,7 @@ RUN mkdir -p /app/db && chown -R nextjs:nodejs /app
 
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 3084
 
 # Run migrations on container start, then start the server.
 # `bunx prisma db push` creates/updates the SQLite schema.

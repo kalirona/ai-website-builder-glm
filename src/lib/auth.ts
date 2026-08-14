@@ -19,7 +19,7 @@ export const authOptions: NextAuthOptions = {
   },
   // CRITICAL (gateway/proxy fix):
   // The app runs behind a Caddy gateway (HTTPS) but Next.js itself runs on
-  // http://localhost:3000. NextAuth v4's auto-detection of HTTPS via
+  // http://localhost:3084. NextAuth v4's auto-detection of HTTPS via
   // X-Forwarded-Proto causes it to set useSecureCookies=true, which (a)
   // renames cookies to __Secure-/__Host- prefixes and (b) sets the Secure
   // flag. Through the proxy this broke cookie storage and caused a

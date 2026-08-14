@@ -4,11 +4,11 @@ cd /home/z/my-project
 pkill -f "next dev" 2>/dev/null; sleep 1
 nohup bun run dev </dev/null >dev.log 2>&1 &
 SRV=$!
-for i in $(seq 1 40); do c=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null); [ "$c" = "200" ] && break; sleep 1; done
+for i in $(seq 1 40); do c=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3084/ 2>/dev/null); [ "$c" = "200" ] && break; sleep 1; done
 
 EMAIL="test+$(date +%s)@webcraft.test"; PASS="password123"
-curl -s -X POST http://localhost:3000/api/auth/register -H "Content-Type: application/json" -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"name\":\"T\"}" >/dev/null
-agent-browser open http://localhost:3000/login >/dev/null 2>&1; sleep 2
+curl -s -X POST http://localhost:3084/api/auth/register -H "Content-Type: application/json" -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"name\":\"T\"}" >/dev/null
+agent-browser open http://localhost:3084/login >/dev/null 2>&1; sleep 2
 agent-browser find label "Email" fill "$EMAIL" >/dev/null 2>&1
 agent-browser find label "Password" fill "$PASS" >/dev/null 2>&1
 agent-browser find role button click --name "Sign in" >/dev/null 2>&1; sleep 3
