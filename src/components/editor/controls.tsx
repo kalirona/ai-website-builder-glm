@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Plus, Trash2, ChevronDown, ChevronUp, ChevronRight } from "lucide-react"
 import type { Node, SettingsField, Device } from "@/lib/editor/types"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+
+/** Update patch shape used by all field controls. */
+export type UpdatePatch = {
+  props?: Record<string, unknown>
+  styles?: Record<string, unknown>
+}
+
+/** Debounce window for committing live text edits to history (ms). */
+const LIVE_COMMIT_DEBOUNCE_MS = 400
 
 /** Get a value by dot path from props or styles. */
 export function getField(node: Node, key: string): unknown {
@@ -46,7 +55,7 @@ export function setField(
   node: Node,
   key: string,
   value: unknown
-): { props?: Record<string, unknown>; styles?: Record<string, unknown> } {
+): UpdatePatch {
   const isStyle = key.startsWith("styles.")
   const rootPath = isStyle ? key.slice("styles.".length) : key
   const source = (isStyle ? node.styles : node.props) as Record<string, unknown>
@@ -67,19 +76,84 @@ function setPath(obj: Record<string, unknown>, path: string[], value: unknown): 
   return next
 }
 
+/**
+ * Hook: a debounced commit trigger used by text-style inputs.
+ *
+ * Returns a function the input calls on every keystroke; after the user stops
+ * typing for LIVE_COMMIT_DEBOUNCE_MS, `onCommit` fires once (creating a single
+ * undo entry for the burst). Also returns `flush()` (call on blur) and
+ * `cancel()` (call on unmount / external change) helpers.
+ */
+function useDebouncedCommit(onCommit: () => void) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Keep the latest onCommit in a ref so the timer (which is created once)
+  // always calls the freshest callback. Updated in an effect to avoid
+  // mutating refs during render.
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => {
+    onCommitRef.current = onCommit
+  }, [onCommit])
+
+  // Cleanup on unmount — never leave a dangling timer.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  const schedule = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      onCommitRef.current()
+    }, LIVE_COMMIT_DEBOUNCE_MS)
+  }
+
+  const flush = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+      onCommitRef.current()
+    }
+  }
+
+  const cancel = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  return { schedule, flush, cancel }
+}
+
 /** The master field renderer. Picks the right control by type. */
 export function FieldRenderer({
   node,
   field,
   onUpdate,
+  onUpdateLive,
+  onCommitHistory,
   device,
 }: {
   node: Node
   field: SettingsField
-  onUpdate: (patch: { props?: Record<string, unknown>; styles?: Record<string, unknown> }) => void
+  /** Discrete update — commits history immediately. Used by non-text controls. */
+  onUpdate: (patch: UpdatePatch) => void
+  /** Live update — mutates nodes immediately, no history. Used by text controls. */
+  onUpdateLive?: (patch: UpdatePatch) => void
+  /** Commit a single history entry after a burst of live updates. */
+  onCommitHistory?: () => void
   device: Device
 }) {
   const value = getField(node, field.key)
+
+  // For text/textarea/responsive-text we prefer live updates so the canvas
+  // reflects typing in real time without flooding the undo stack. If the
+  // caller didn't pass live/commit callbacks (legacy), fall back to discrete.
+  const useLive = onUpdateLive && onCommitHistory
+  const liveUpdate = useLive ? onUpdateLive! : onUpdate
+  const commit = useLive ? onCommitHistory! : undefined
 
   switch (field.type) {
     case "text":
@@ -88,7 +162,8 @@ export function FieldRenderer({
           label={field.label}
           value={(value as string) ?? ""}
           placeholder={field.placeholder}
-          onChange={(v) => onUpdate(setField(node, field.key, v))}
+          onChange={(v) => liveUpdate(setField(node, field.key, v))}
+          onCommit={commit}
         />
       )
     case "textarea":
@@ -97,7 +172,8 @@ export function FieldRenderer({
           label={field.label}
           value={(value as string) ?? ""}
           placeholder={field.placeholder}
-          onChange={(v) => onUpdate(setField(node, field.key, v))}
+          onChange={(v) => liveUpdate(setField(node, field.key, v))}
+          onCommit={commit}
         />
       )
     case "color":
@@ -151,7 +227,8 @@ export function FieldRenderer({
           value={value as { desktop?: string; tablet?: string; mobile?: string } | string | undefined}
           device={device}
           placeholder={field.placeholder}
-          onChange={(v) => onUpdate(setField(node, field.key, v))}
+          onChange={(v) => liveUpdate(setField(node, field.key, v))}
+          onCommit={commit}
         />
       )
     case "list":
@@ -186,18 +263,34 @@ function TextInput({
   value,
   placeholder,
   onChange,
+  onCommit,
 }: {
   label: string
   value: string
   placeholder?: string
   onChange: (v: string) => void
+  /** Commit a debounced history entry. Used by text inputs. */
+  onCommit?: () => void
 }) {
+  const { schedule, flush, cancel } = useDebouncedCommit(() => onCommit?.())
+  // Cancel any pending commit if the component unmounts (e.g. selection
+  // changed) without firing a spurious commit.
+  useEffect(() => {
+    return () => cancel()
+  }, [cancel])
+
   return (
     <FieldRow label={label}>
       <Input
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value)
+          if (onCommit) schedule()
+        }}
+        onBlur={() => {
+          if (onCommit) flush()
+        }}
         className="h-8 text-sm"
       />
     </FieldRow>
@@ -209,18 +302,31 @@ function TextareaInput({
   value,
   placeholder,
   onChange,
+  onCommit,
 }: {
   label: string
   value: string
   placeholder?: string
   onChange: (v: string) => void
+  onCommit?: () => void
 }) {
+  const { schedule, flush, cancel } = useDebouncedCommit(() => onCommit?.())
+  useEffect(() => {
+    return () => cancel()
+  }, [cancel])
+
   return (
     <FieldRow label={label}>
       <Textarea
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value)
+          if (onCommit) schedule()
+        }}
+        onBlur={() => {
+          if (onCommit) flush()
+        }}
         className="min-h-[72px] text-sm"
       />
     </FieldRow>
@@ -377,12 +483,14 @@ function ResponsiveTextInput({
   device,
   placeholder,
   onChange,
+  onCommit,
 }: {
   label: string
   value: { desktop?: string; tablet?: string; mobile?: string } | string | undefined
   device: Device
   placeholder?: string
   onChange: (v: { desktop: string; tablet?: string; mobile?: string }) => void
+  onCommit?: () => void
 }) {
   const resolved: { desktop: string; tablet?: string; mobile?: string } =
     typeof value === "string"
@@ -390,6 +498,11 @@ function ResponsiveTextInput({
       : { desktop: value?.desktop ?? "", tablet: value?.tablet, mobile: value?.mobile }
 
   const set = (d: Device, v: string) => onChange({ ...resolved, [d]: v })
+
+  const { schedule, flush, cancel } = useDebouncedCommit(() => onCommit?.())
+  useEffect(() => {
+    return () => cancel()
+  }, [cancel])
 
   return (
     <FieldRow label={label}>
@@ -402,7 +515,13 @@ function ResponsiveTextInput({
             <Input
               value={(resolved[d] as string) ?? ""}
               placeholder={placeholder}
-              onChange={(e) => set(d, e.target.value)}
+              onChange={(e) => {
+                set(d, e.target.value)
+                if (onCommit) schedule()
+              }}
+              onBlur={() => {
+                if (onCommit) flush()
+              }}
               className={cn(
                 "h-8 pl-5 text-sm",
                 device === d && "ring-2 ring-primary"
@@ -428,7 +547,7 @@ function ListInput({
   itemFields: { key: string; label: string; type: string; placeholder?: string }[]
   node: Node
   fieldKey: string
-  onUpdate: (patch: { props?: Record<string, unknown>; styles?: Record<string, unknown> }) => void
+  onUpdate: (patch: UpdatePatch) => void
 }) {
   const [openIdx, setOpenIdx] = useState<number | null>(0)
 

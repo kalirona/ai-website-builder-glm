@@ -2,10 +2,9 @@ import { redirect } from "next/navigation"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { AppLogo } from "@/components/shared/app-logo"
 import { CreateWebsiteDialog } from "@/components/dashboard/create-website-dialog"
 import { ProjectCard } from "@/components/dashboard/project-card"
-import { UserMenu } from "@/components/dashboard/user-menu"
+import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { Button } from "@/components/ui/button"
 import { Plus, Layers, FileEdit, Globe } from "lucide-react"
 
@@ -53,59 +52,60 @@ export default async function DashboardPage() {
   ).length
 
   return (
-    <div className="flex min-h-screen flex-col bg-muted/30">
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <AppLogo href="/dashboard" />
-          <div className="flex items-center gap-2">
+    <div className="flex min-h-screen bg-muted/30">
+      <DashboardSidebar userName={user.name} userEmail={user.email} />
+
+      <div className="flex min-h-screen flex-1 flex-col">
+        <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
+          <div className="flex h-16 items-center justify-between px-4 md:px-8">
+            <h1 className="text-lg font-semibold">Dashboard</h1>
             <CreateWebsiteDialog>
               <Button size="sm">
                 <Plus className="mr-1.5 h-4 w-4" />
                 New Website
               </Button>
             </CreateWebsiteDialog>
-            <UserMenu name={user.name} email={user.email} />
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Welcome back{user.name ? `, ${user.name.split(" ")[0]}` : ""} 👋
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Manage your websites and create new ones with AI.
-          </p>
-        </div>
-
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard icon={Layers} label="Total projects" value={list.length} />
-          <StatCard icon={FileEdit} label="Ready to publish" value={ready} />
-          <StatCard icon={Globe} label="Published" value={published} />
-        </div>
-
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Your websites</h2>
-        </div>
-
-        {list.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {list.map((p) => (
-              <ProjectCard key={p.id} project={p} />
-            ))}
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 md:px-8">
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold tracking-tight">
+              Welcome back{user.name ? `, ${user.name.split(" ")[0]}` : ""} 👋
+            </h2>
+            <p className="mt-1 text-muted-foreground">
+              Manage your websites and create new ones with AI.
+            </p>
           </div>
-        )}
-      </main>
 
-      <footer className="border-t bg-background">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-xs text-muted-foreground">
-          <span>© {new Date().getFullYear()} Webcraft</span>
-          <span>Built with AI</span>
-        </div>
-      </footer>
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard icon={Layers} label="Total projects" value={list.length} />
+            <StatCard icon={FileEdit} label="Ready to publish" value={ready} />
+            <StatCard icon={Globe} label="Published" value={published} />
+          </div>
+
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Your websites</h3>
+          </div>
+
+          {list.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {list.map((p) => (
+                <ProjectCard key={p.id} project={p} />
+              ))}
+            </div>
+          )}
+        </main>
+
+        <footer className="border-t bg-background">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-xs text-muted-foreground md:px-8">
+            <span>© {new Date().getFullYear()} Webcraft</span>
+            <span>Built with AI</span>
+          </div>
+        </footer>
+      </div>
     </div>
   )
 }

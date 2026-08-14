@@ -26,6 +26,9 @@ export function RightPanel() {
   const device = useEditorStore((s) => s.device)
   const updateProps = useEditorStore((s) => s.updateProps)
   const updateStyles = useEditorStore((s) => s.updateStyles)
+  const updatePropsLive = useEditorStore((s) => s.updatePropsLive)
+  const updateStylesLive = useEditorStore((s) => s.updateStylesLive)
+  const commitHistory = useEditorStore((s) => s.commitHistory)
 
   const selected = selectedId ? nodes[selectedId] : null
   const def = selected ? getComponent(selected.type) : null
@@ -44,10 +47,21 @@ export function RightPanel() {
     return map
   }, [def])
 
+  // Discrete controls (select, slider, toggle, color, image, list) — each
+  // change is a discrete action that immediately commits a history entry.
   const handleUpdate = (patch: { props?: Record<string, unknown>; styles?: Record<string, unknown> }) => {
     if (!selectedId) return
     if (patch.props) updateProps(selectedId, patch.props)
     if (patch.styles) updateStyles(selectedId, patch.styles)
+  }
+
+  // Live controls (text, textarea, responsive-text) — update the node
+  // immediately on every keystroke (no history entry), then commit a single
+  // history entry when the user stops typing (debounced) or blurs the input.
+  const handleUpdateLive = (patch: { props?: Record<string, unknown>; styles?: Record<string, unknown> }) => {
+    if (!selectedId) return
+    if (patch.props) updatePropsLive(selectedId, patch.props)
+    if (patch.styles) updateStylesLive(selectedId, patch.styles)
   }
 
   if (!selected || !def || !grouped) {
@@ -101,6 +115,8 @@ export function RightPanel() {
                       node={selected}
                       field={f}
                       onUpdate={handleUpdate}
+                      onUpdateLive={handleUpdateLive}
+                      onCommitHistory={commitHistory}
                       device={device}
                     />
                   ))}

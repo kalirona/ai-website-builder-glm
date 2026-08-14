@@ -1,27 +1,37 @@
 "use client"
 
 import { useState, useMemo, useRef, useEffect } from "react"
-import { Layers, Component, FileText, ChevronRight, ChevronDown, Search } from "lucide-react"
+import { Layers, Component, FileText, ChevronRight, ChevronDown, Search, Plus, X, Loader2 } from "lucide-react"
 import { listComponentsByCategory, getComponent } from "@/lib/editor/registry"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
 import { PaletteItem } from "./palette-item"
 import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
+import { slugify, cn } from "@/lib/utils"
 import type { Node } from "@/lib/editor/types"
 
 type Tab = "components" | "layers" | "pages"
 
 export function LeftSidebar({
+  projectId,
   pages,
   currentPageSlug,
   onSelectPage,
 }: {
+  projectId: string
   pages: { slug: string; name: string }[]
   currentPageSlug: string
   onSelectPage: (slug: string) => void
 }) {
   const [tab, setTab] = useState<Tab>("components")
+  // Local copy of the pages list so newly-created pages show up immediately
+  // without needing a server round-trip through the parent.
+  const [localPages, setLocalPages] = useState(pages)
+  useEffect(() => {
+    setLocalPages(pages)
+  }, [pages])
 
   const tabs: { id: Tab; label: string; icon: typeof Component }[] = [
     { id: "components", label: "Add", icon: Component },
@@ -57,9 +67,11 @@ export function LeftSidebar({
         {tab === "layers" && <LayersTab />}
         {tab === "pages" && (
           <PagesTab
-            pages={pages}
+            projectId={projectId}
+            pages={localPages}
             currentPageSlug={currentPageSlug}
             onSelectPage={onSelectPage}
+            onPagesChange={setLocalPages}
           />
         )}
       </div>
@@ -243,32 +255,165 @@ function LayersTab() {
 }
 
 function PagesTab({
+  projectId,
   pages,
   currentPageSlug,
   onSelectPage,
+  onPagesChange,
 }: {
+  projectId: string
   pages: { slug: string; name: string }[]
   currentPageSlug: string
   onSelectPage: (slug: string) => void
+  onPagesChange: (pages: { slug: string; name: string }[]) => void
 }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState("")
+  const [slug, setSlug] = useState("")
+  const [creating, setCreating] = useState(false)
+
+  const startAdd = () => {
+    setAdding(true)
+    setName("")
+    setSlug("")
+  }
+  const cancelAdd = () => {
+    setAdding(false)
+    setName("")
+    setSlug("")
+  }
+
+  // Auto-derive slug from name when the user hasn't manually edited it.
+  const handleNameChange = (v: string) => {
+    setName(v)
+    if (!slug || slug === slugify(name)) {
+      setSlug(slugify(v))
+    }
+  }
+
+  const handleCreate = async () => {
+    const trimmedName = name.trim()
+    if (!trimmedName || creating) return
+    setCreating(true)
+    try {
+      const res = await fetch(`/api/pages/${projectId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmedName, slug: slug.trim() || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(typeof data?.error === "string" ? data.error : "Failed to create page")
+        return
+      }
+      const newPage = data.page as { slug: string; name: string }
+      onPagesChange([...pages, newPage])
+      setAdding(false)
+      setName("")
+      setSlug("")
+      toast.success(`Page "${newPage.name}" created`)
+      onSelectPage(newPage.slug)
+    } catch {
+      toast.error("Network error. Please try again.")
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
-    <div className="space-y-1 p-3">
-      {pages.map((p) => (
-        <button
-          key={p.slug}
-          onClick={() => onSelectPage(p.slug)}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition",
-            p.slug === currentPageSlug
-              ? "bg-primary/10 text-primary"
-              : "hover:bg-muted"
-          )}
+    <div className="space-y-2 p-3">
+      {!adding ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={startAdd}
+          className="w-full justify-start gap-1.5 text-xs"
         >
-          <FileText className="h-4 w-4 opacity-70" />
-          <span className="flex-1 truncate">{p.name}</span>
-          <span className="text-[11px] text-muted-foreground">/{p.slug}</span>
-        </button>
-      ))}
+          <Plus className="h-3.5 w-3.5" />
+          Add Page
+        </Button>
+      ) : (
+        <div className="space-y-2 rounded-lg border bg-background p-2.5">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Name</label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="About"
+              className="h-8 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim() && !creating) {
+                  e.preventDefault()
+                  handleCreate()
+                } else if (e.key === "Escape") {
+                  e.preventDefault()
+                  cancelAdd()
+                }
+              }}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Slug</label>
+            <Input
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder="about"
+              className="h-8 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim() && !creating) {
+                  e.preventDefault()
+                  handleCreate()
+                } else if (e.key === "Escape") {
+                  e.preventDefault()
+                  cancelAdd()
+                }
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-1.5 pt-1">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleCreate}
+              disabled={!name.trim() || creating}
+              className="h-7 flex-1 text-xs"
+            >
+              {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : "Create"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={cancelAdd}
+              disabled={creating}
+              className="h-7 w-7 p-0"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1 pt-1">
+        {pages.map((p) => (
+          <button
+            key={p.slug}
+            onClick={() => onSelectPage(p.slug)}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition",
+              p.slug === currentPageSlug
+                ? "bg-primary/10 text-primary"
+                : "hover:bg-muted"
+            )}
+          >
+            <FileText className="h-4 w-4 opacity-70" />
+            <span className="flex-1 truncate">{p.name}</span>
+            <span className="text-[11px] text-muted-foreground">/{p.slug}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

@@ -120,6 +120,7 @@ export function EditorShell({
         <ResizablePanelGroup direction="horizontal" className="h-full">
           <ResizablePanel defaultSize={18} minSize={14} maxSize={28} className="hidden sm:block">
             <LeftSidebar
+              projectId={projectId}
               pages={pages}
               currentPageSlug={currentPageSlug}
               onSelectPage={handleSelectPage}

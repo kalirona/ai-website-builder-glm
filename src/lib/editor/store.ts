@@ -56,6 +56,25 @@ interface EditorStoreState {
   updateProps: (id: string, patch: Record<string, unknown>) => void
   updateStyles: (id: string, patch: Record<string, unknown>) => void
   /**
+   * Live (debounced) variants of updateProps/updateStyles for text inputs.
+   * These update `nodes` immediately so the canvas reflects changes as the
+   * user types, mark dirty=true and clear `future`, but do NOT push a
+   * snapshot to `past`. The caller must invoke `commitHistory()` after the
+   * burst of edits (e.g. on blur or after a 400ms debounce) to create a
+   * single undo entry for the whole burst.
+   *
+   * Without this, typing 50 characters floods the undo stack with 50
+   * snapshots and makes the canvas laggy (deep clone on every keystroke).
+   */
+  updatePropsLive: (id: string, patch: Record<string, unknown>) => void
+  updateStylesLive: (id: string, patch: Record<string, unknown>) => void
+  /**
+   * Push the current nodes/rootId state into `past` (capped at HISTORY_LIMIT).
+   * Use after a burst of `updatePropsLive` / `updateStylesLive` calls to
+   * create a single undo entry for the burst. No-op if there are no nodes.
+   */
+  commitHistory: () => void
+  /**
    * Apply a validated AI section patch to a node (merge mode). Creates
    * exactly ONE undo history entry. Preserves the node's id + parent.
    * Returns true on success, false if rejected (root / type mismatch /
@@ -220,6 +239,45 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
       nodes,
       dirty: true,
+      future: [],
+    })
+  },
+
+  // Live (debounced) variants — update nodes immediately so the canvas
+  // reflects the change as the user types, but DON'T push to past. The
+  // caller commits a single history entry via commitHistory() after the
+  // burst (e.g. on blur or after a 400ms debounce).
+  updatePropsLive: (id, patch) => {
+    const state = get()
+    const existing = state.nodes[id]
+    if (!existing) return
+    const node: Node = {
+      ...existing,
+      props: { ...existing.props, ...patch },
+      children: [...existing.children],
+    }
+    const nodes = { ...state.nodes, [id]: node }
+    set({ nodes, dirty: true, future: [] })
+  },
+
+  updateStylesLive: (id, patch) => {
+    const state = get()
+    const existing = state.nodes[id]
+    if (!existing) return
+    const node: Node = {
+      ...existing,
+      styles: { ...existing.styles, ...patch },
+      children: [...existing.children],
+    }
+    const nodes = { ...state.nodes, [id]: node }
+    set({ nodes, dirty: true, future: [] })
+  },
+
+  commitHistory: () => {
+    const state = get()
+    if (Object.keys(state.nodes).length === 0) return
+    set({
+      past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
       future: [],
     })
   },

@@ -687,3 +687,68 @@ Stage Summary:
 - Files modified: src/lib/editor/store.ts, src/components/editor/left-sidebar.tsx
 - Files created: none
 - 3 concrete problems fixed. Architecture unchanged. No framework/rewrite.
+
+---
+Task ID: 3.x
+Agent: fullstack-developer
+Task: Fix right-panel live updates + add new components + add-page + dashboard sidebar + preview/dnd polish
+
+Work Log:
+- Read worklog.md and PRODUCTION_REPORT.md to understand existing architecture (Zustand store with flat node map, NodeRenderer single renderer, 12-component registry).
+- Issue 1 (right-panel live updates): Added `updatePropsLive`, `updateStylesLive`, `commitHistory` actions to `src/lib/editor/store.ts`. The live variants mutate `nodes` immediately and clear `future` + set `dirty=true` but do NOT push to `past`; `commitHistory` pushes the current state once (capped at 50). In `src/components/editor/controls.tsx`, added a `useDebouncedCommit` hook (400ms) used by `TextInput`, `TextareaInput`, and `ResponsiveTextInput` — they call live update on every keystroke (canvas updates instantly) and schedule a single `commitHistory()` on the trailing edge; blur flushes immediately. Discrete controls (select, slider, toggle, color, image, list) keep using `updateProps`/`updateStyles` (one history entry per change). `FieldRenderer` now takes optional `onUpdateLive` and `onCommitHistory`; `RightPanel` passes both.
+- Issue 2 (new components): Added 7 new components to `src/components/website/` and registered all in `src/components/website/index.ts`:
+  - `columns.tsx` (ColumnsDef, layout, isCanvas=true, allowedChildren="*", props: columns 1-4, gap; CSS grid that stacks on mobile).
+  - `pricing.tsx` (PricingDef, marketing, plans list with featured tier + "Popular" badge, primary border on featured).
+  - `faq.tsx` (FaqDef, marketing, shadcn Accordion with 4 default Q&A pairs).
+  - `logo-cloud.tsx` (LogoCloudDef, marketing, grayscale logo row, image or text fallback).
+  - `divider.tsx` (DividerDef, content, styled `<hr>` with color/thickness/width).
+  - `spacer.tsx` (SpacerDef, content, empty div with responsive height).
+  - `video.tsx` (VideoDef, media, YouTube/Vimeo/embed URL → iframe, aspectRatio select).
+  - `stat.tsx` (StatDef, marketing, big-number stats row, 4 defaults).
+  Each has proper `settings` arrays driving the right panel.
+- Issue 3 (Add Page): Added `POST` handler to `src/app/api/pages/[projectId]/route.ts` that verifies ownership, derives a slug from `name` if missing, rejects duplicate slugs, creates a blank page with `createBlankEditorData()`. Updated `PagesTab` in `src/components/editor/left-sidebar.tsx` with an "Add Page" button + inline form (name + slug, slug auto-derived), calls the endpoint, refreshes the local pages list, switches to the new page on success. `LeftSidebar` now takes `projectId` (passed from `EditorShell` → `LeftSidebar`).
+- Issue 4 (Back to Dashboard): Added an `ArrowLeft` `Link` to `/dashboard` at the far left of the top bar in `src/components/editor/top-bar.tsx`, before the Webcraft logo, with a tooltip.
+- Issue 5 (dashboard sidebar): Created `src/components/dashboard/sidebar.tsx` (DashboardSidebar, ~240px wide, AppLogo top, nav items Dashboard/Websites/Settings, user info + Logout at bottom using `signOut`). Updated `src/app/dashboard/page.tsx` to wrap content in a flex layout with the sidebar on the left and the projects grid on the right (removed old top-bar header with UserMenu — sidebar now provides nav + user info + logout). Created `src/app/settings/page.tsx` with Profile / Brand defaults / Danger zone sections. Created `src/components/dashboard/settings-form.tsx` (client) for the settings page — Profile section calls `PATCH /api/user`, Brand defaults are displayed (read-only with "coming soon" note), Danger zone has an AlertDialog confirmation. Created `src/app/api/user/route.ts` with `GET` and `PATCH` handlers. Created `src/app/websites/page.tsx` as a redirect alias to `/dashboard` per spec.
+- Issue 6 (draft preview): Verified the Preview button in `top-bar.tsx` uses `<Link href={`/preview/${projectId}`} target="_blank">` (correct). Verified `/preview/[projectId]/page.tsx` route exists and renders `PreviewRenderer` with the home page editorData. Added a "Back to Editor" button (ArrowLeft + Link to `/editor/${projectId}`) to the PreviewRenderer toolbar — passes `projectId` from the preview page. Device toggle (desktop/tablet/mobile) was already present in PreviewRenderer and verified to work.
+- Issue 7 (dnd reliability): Verified the existing dnd implementation:
+  - `PointerSensor` activation constraint `{ distance: 6 }` is present in `src/components/editor/canvas.tsx` (line 50).
+  - `stopPropagation` is on all toolbar buttons (`moveUp`, `moveDown`, `handleDuplicate`, `handleDelete`) AND the toolbar container (`onClick` + `onMouseDown`) AND the `AskAiButton` in `src/components/editor/node-wrapper.tsx`.
+  - `PaletteItem` click vs drag distinction works because `{ distance: 6 }` activates drag only after 6px movement; pure clicks fall through to `handleClick` (add to selected container or root), drags go to `handleDragEnd` (add at drop position).
+  - Existing-node drag (move) is handled by `handleDragEnd` in canvas.tsx with proper cycle/descendant checks.
+  No code changes required — all listed dnd guarantees were already in place.
+
+Lint / Type-check:
+- `bun run lint`: 0 errors, 0 warnings.
+- `bunx tsc --noEmit`: 0 errors in src/ (only unrelated errors in `examples/` and `skills/` which are not part of the project).
+
+Files Created:
+- `src/components/website/columns.tsx`
+- `src/components/website/pricing.tsx`
+- `src/components/website/faq.tsx`
+- `src/components/website/logo-cloud.tsx`
+- `src/components/website/divider.tsx`
+- `src/components/website/spacer.tsx`
+- `src/components/website/video.tsx`
+- `src/components/website/stat.tsx`
+- `src/app/api/user/route.ts`
+- `src/app/settings/page.tsx`
+- `src/app/websites/page.tsx`
+- `src/components/dashboard/sidebar.tsx`
+- `src/components/dashboard/settings-form.tsx`
+
+Files Modified:
+- `src/lib/editor/store.ts` (added updatePropsLive, updateStylesLive, commitHistory)
+- `src/components/editor/controls.tsx` (useDebouncedCommit hook + onCommit/onUpdateLive/onCommitHistory props on FieldRenderer; live updates for text/textarea/responsive-text)
+- `src/components/editor/right-panel.tsx` (passes onUpdateLive + onCommitHistory to FieldRenderer)
+- `src/components/editor/editor-shell.tsx` (passes projectId to LeftSidebar)
+- `src/components/editor/left-sidebar.tsx` (LeftSidebar takes projectId; PagesTab "Add Page" inline form)
+- `src/components/editor/top-bar.tsx` (ArrowLeft Back to Dashboard button)
+- `src/components/editor/preview-renderer.tsx` (Back to Editor button + a11y attrs on device toggle)
+- `src/app/api/pages/[projectId]/route.ts` (POST handler for new page)
+- `src/app/preview/[projectId]/page.tsx` (passes projectId to PreviewRenderer)
+- `src/app/dashboard/page.tsx` (sidebar layout, removed UserMenu — sidebar handles it)
+- `src/components/website/index.ts` (registers all 7 new components)
+
+Stage Summary:
+- All 7 issues resolved. Editor right-panel now updates the canvas live as the user types, with a single undo entry per text burst. 7 new components (Columns, Pricing, FAQ, LogoCloud, Divider, Spacer, Video, Stat) bring the registry to 19 components. PagesTab can add new pages via POST /api/pages/[projectId]. Dashboard has a persistent sidebar with Dashboard/Websites/Settings/Logout, and the new Settings page lets users update their display name. Preview page has a Back to Editor button. Drag-and-drop reliability verified — all guarantees already in place. Lint and TypeScript clean.
+

@@ -32,6 +32,7 @@ export default async function PreviewPage({
         editorData={createBlankEditorData()}
         designTokens={defaultDesignTokens}
         projectName={project.name}
+        projectId={project.id}
       />
     )
   }
@@ -53,6 +54,7 @@ export default async function PreviewPage({
       editorData={editorData}
       designTokens={tokens}
       projectName={project.name}
+      projectId={project.id}
     />
   )
 }

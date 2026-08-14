@@ -1,10 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Monitor, Tablet, Smartphone, ExternalLink } from "lucide-react"
+import Link from "next/link"
+import { Monitor, Tablet, Smartphone, ExternalLink, ArrowLeft } from "lucide-react"
 import { EditorContextProvider } from "./editor-context"
 import { NodeRenderer } from "./node-renderer"
 import { tokensToCssVars, deviceWidth } from "@/lib/editor/design-tokens"
+import { Button } from "@/components/ui/button"
 import type { EditorData, DesignTokens, Device } from "@/lib/editor/types"
 import { cn } from "@/lib/utils"
 
@@ -16,10 +18,12 @@ export function PreviewRenderer({
   editorData,
   designTokens,
   projectName,
+  projectId,
 }: {
   editorData: EditorData
   designTokens: DesignTokens
   projectName: string
+  projectId?: string
 }) {
   const [device, setDevice] = useState<Device>("desktop")
 
@@ -35,13 +39,33 @@ export function PreviewRenderer({
     <div className="flex min-h-screen flex-col bg-slate-100">
       {/* Preview toolbar */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b bg-card px-4">
-        <span className="text-sm font-medium">{projectName} — Preview</span>
+        <div className="flex items-center gap-2">
+          {projectId && (
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              className="gap-1.5 px-2"
+            >
+              <Link href={`/editor/${projectId}`}>
+                <ArrowLeft className="h-4 w-4" />
+                <span className="hidden sm:inline">Back to Editor</span>
+              </Link>
+            </Button>
+          )}
+          <span className="text-sm font-medium">
+            {projectName} — Preview
+          </span>
+        </div>
         <div className="flex items-center gap-0.5 rounded-lg border bg-muted/50 p-0.5">
           {devices.map((d) => {
             const Icon = d.icon
             return (
               <button
                 key={d.id}
+                type="button"
+                aria-label={`Preview ${d.id}`}
+                aria-pressed={device === d.id}
                 onClick={() => setDevice(d.id)}
                 className={cn(
                   "inline-flex h-7 w-7 items-center justify-center rounded-md transition",

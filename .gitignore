@@ -59,3 +59,4 @@ server.log
 *.log
 db/*.db
 db/*.db-journal
+tool-results/
