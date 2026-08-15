@@ -95,15 +95,33 @@ export function EditorCanvas() {
     const targetDef = getComponent(target.type)
     const targetIsCanvas = !!targetDef?.isCanvas
 
+    // Compute drop position (before/after/inside) from cursor vs target rect.
+    // This mirrors Craft.js's drop indicators.
+    const overRect = e.over?.rect
+    const activeRect = e.active?.rect.current.translated
+    let dropPos: "before" | "after" | "inside" = "after"
+    if (overRect && activeRect) {
+      const midY = overRect.top + overRect.height / 2
+      if (targetIsCanvas && activeRect.top > overRect.top + overRect.height * 0.3 && activeRect.top < overRect.top + overRect.height * 0.7) {
+        dropPos = "inside"
+      } else if (activeRect.top < midY) {
+        dropPos = "before"
+      } else {
+        dropPos = "after"
+      }
+    }
+
     // Palette drag → add a new node
     if (activeId.startsWith("palette:")) {
       const type = activeId.replace("palette:", "")
-      if (targetIsCanvas) {
+      if (dropPos === "inside" && targetIsCanvas) {
         addNode(type, targetNodeId)
       } else if (target.parent) {
         const parent = nodes[target.parent]
         const idx = parent.children.indexOf(targetNodeId)
-        addNode(type, parent.id, idx + 1)
+        addNode(type, parent.id, dropPos === "before" ? idx : idx + 1)
+      } else if (targetIsCanvas) {
+        addNode(type, targetNodeId)
       } else {
         addNode(type, rootId)
       }
@@ -121,16 +139,17 @@ export function EditorCanvas() {
       // can't move into own descendant
       if (isDescendant(data, targetNodeId, draggedId)) return
 
-      if (targetIsCanvas) {
+      if (dropPos === "inside" && targetIsCanvas) {
         moveNode(draggedId, targetNodeId)
       } else if (target.parent) {
         const parent = nodes[target.parent]
-        let idx = parent.children.indexOf(targetNodeId) + 1
+        let idx = parent.children.indexOf(targetNodeId)
+        if (dropPos === "after") idx += 1
         // if dragging within same parent and currently before target,
         // removal shifts target left, so decrease by 1
         if (parent.id === nodes[draggedId]?.parent) {
           const curIdx = parent.children.indexOf(draggedId)
-          if (curIdx < idx - 1) idx -= 1
+          if (curIdx < idx) idx -= 1
         }
         moveNode(draggedId, parent.id, idx)
       }
@@ -166,6 +185,11 @@ export function EditorCanvas() {
       >
         <div
           className="flex h-full w-full flex-col overflow-hidden bg-slate-100"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle, #cbd5e1 1px, transparent 1px)",
+            backgroundSize: "20px 20px",
+          }}
           onClick={() => select(null)}
         >
           {/* Breadcrumb bar (Phase 2.8) */}

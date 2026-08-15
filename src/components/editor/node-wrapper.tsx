@@ -17,9 +17,13 @@ import { AskAiButton } from "./ai-assistant"
 import { cn } from "@/lib/utils"
 
 /**
- * Wraps a rendered node in the editor. Handles selection outline, hover,
- * the contextual toolbar (drag / move / duplicate / delete), and DnD.
+ * Drop position: "before" | "after" (insert between siblings) | "inside"
+ * (drop into a canvas). Computed from the cursor's vertical position over
+ * the node — top third = before, bottom third = after, middle = inside
+ * (for canvas nodes only). This mirrors how Craft.js shows drop indicators.
  */
+type DropPos = "before" | "after" | "inside"
+
 export function NodeWrapper({
   nodeId,
   isCanvas,
@@ -34,6 +38,7 @@ export function NodeWrapper({
   const duplicateNode = useEditorStore((s) => s.duplicateNode)
   const moveNode = useEditorStore((s) => s.moveNode)
   const [hovered, setHovered] = useState(false)
+  const [dropPos, setDropPos] = useState<DropPos | null>(null)
 
   const node = nodes[nodeId]
   const def = node ? getComponent(node.type) : undefined
@@ -60,6 +65,21 @@ export function NodeWrapper({
   const setRef = (el: HTMLElement | null) => {
     setDragRef(el)
     setDropRef(el)
+  }
+
+  // Compute drop position from cursor Y over the node.
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isOver) return
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const y = e.clientY - rect.top
+    const h = rect.height
+    if (isCanvas && y > h * 0.3 && y < h * 0.7) {
+      setDropPos("inside")
+    } else if (y < h * 0.5) {
+      setDropPos("before")
+    } else {
+      setDropPos("after")
+    }
   }
 
   const showOutline = isSelected || hovered || isOver
@@ -102,19 +122,44 @@ export function NodeWrapper({
       ref={setRef}
       onClick={handleSelect}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => {
+        setHovered(false)
+        setDropPos(null)
+      }}
+      onDragOver={handleDragOver}
       className={cn(
-        "relative transition-shadow",
-        isDragging && "opacity-40",
-        showOutline && "outline-1 outline-offset-[-1px]",
+        "relative transition-all duration-100",
+        isDragging && "opacity-30",
+        showOutline && "outline-2 outline-offset-[-2px]",
         isSelected && "outline-[var(--brand-primary,#6366f1)]",
-        !isSelected && hovered && "outline-slate-300",
-        !isSelected && isOver && "outline-emerald-500",
+        !isSelected && hovered && "outline-slate-400",
+        !isSelected && isOver && dropPos === "inside" && "outline-emerald-500",
         isRoot && "outline-none"
       )}
-      style={isSelected ? { ["--tw-outline-color" as string]: "var(--brand-primary, #6366f1)" } : undefined}
+      style={
+        isSelected
+          ? { ["--tw-outline-color" as string]: "var(--brand-primary, #6366f1)" }
+          : undefined
+      }
     >
       {children}
+
+      {/* Drop indicator lines (before/after) — like Craft.js */}
+      {isOver && !isDragging && dropPos === "before" && (
+        <div className="pointer-events-none absolute -top-0.5 left-0 right-0 z-20 h-0.5 bg-emerald-500">
+          <div className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        </div>
+      )}
+      {isOver && !isDragging && dropPos === "after" && (
+        <div className="pointer-events-none absolute -bottom-0.5 left-0 right-0 z-20 h-0.5 bg-emerald-500">
+          <div className="absolute -left-1 -bottom-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        </div>
+      )}
+
+      {/* Drop-inside hint for canvas nodes */}
+      {isCanvas && isOver && !isDragging && dropPos === "inside" && (
+        <div className="pointer-events-none absolute inset-0 z-10 border-2 border-dashed border-emerald-500/60 bg-emerald-500/5" />
+      )}
 
       {/* Toolbar */}
       {!isRoot && (isSelected || hovered) && def && (
@@ -158,11 +203,6 @@ export function NodeWrapper({
           <Sparkles className="h-3 w-3" />
           AI Preview
         </div>
-      )}
-
-      {/* Drop hint when over a canvas */}
-      {isCanvas && isOver && !isDragging && (
-        <div className="pointer-events-none absolute inset-0 z-10 border-2 border-dashed border-emerald-500/60 bg-emerald-500/5" />
       )}
     </div>
   )
