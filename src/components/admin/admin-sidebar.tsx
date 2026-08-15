@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Users,
   FolderKanban,
+  Settings,
   ArrowLeft,
   LogOut,
 } from "lucide-react"
@@ -29,6 +30,7 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/superadmin", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/superadmin/users", label: "Users", icon: Users },
   { href: "/superadmin/projects", label: "Projects", icon: FolderKanban },
+  { href: "/superadmin/settings", label: "Settings", icon: Settings },
 ]
 
 export function AdminSidebar({

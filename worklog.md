@@ -892,3 +892,48 @@ Security notes:
 - `requireAdmin()` does a fresh DB read on every admin request, so a demoted admin's existing JWT can no longer hit admin endpoints immediately after demotion.
 - The "Cannot change your own role" and "Cannot delete your own account" guards are enforced at the API layer (not just in the UI), so the endpoint is safe even if called directly.
 - Bootstrap checks `adminCount === 0` atomically with a count query before promoting; the worst-case race (two simultaneous bootstrap calls) would create two admins, but the endpoint returns 403 on the second call's check — acceptable for the one-shot deployment-time bootstrap path.
+
+
+---
+Task ID: 3.x-admin-settings
+Agent: full-stack-developer (admin)
+Task: Add comprehensive Super Admin Settings page (platform config, AI provider info, design tokens, feature flags, danger zone)
+
+Work Log:
+- Added the `PlatformSetting` Prisma model (simple `key` PK + `value` String + `updatedAt`), ran `bun run db:push` (schema synced, Prisma Client regenerated to v6.19.2).
+- Created `src/lib/admin/platform-settings.ts` as the single source of truth for known setting keys, their dotted DB names (`platform.*`, `feature.*`, `design.*`), the camelCase ↔ dotted-key maps, the typed `PlatformSettings` interface, default values, a parser (string → typed), and a validator/updater that does per-field type checks (booleans, integers 0–10000, trimmed strings capped at 500 chars) and upserts each changed row in a single `$transaction`.
+- Built 3 new admin API routes — all gated by `requireAdmin()` with the same 401-vs-403 distinction used elsewhere in the admin surface:
+  - `GET /api/admin/settings` → returns the full typed `PlatformSettings` object (defaults fill any missing keys).
+  - `PUT /api/admin/settings` → bulk update from a partial body; ignores unknown fields; 400 on type errors.
+  - `DELETE /api/admin/projects-all` → Danger Zone: deletes every project NOT owned by the calling admin (cascade handled at the schema level — Project → Website → Page); reports `deleted` + `preserved` counts.
+  - `PUT /api/admin/reset-roles` → Danger Zone: demotes every other admin to `user`; the calling admin keeps their role. Self-protection at the API layer (not just the UI).
+- Built `src/components/admin/admin-settings-form.tsx` — client component that fetches settings + AI provider info in parallel on mount, renders 5 cards (Platform Config, AI Provider Config [read-only], Default Design Tokens [with live preview swatches + buttons], Feature Flags [toggles], Danger Zone), shows a sticky save bar with "Revert" + "Save changes" (disabled when not dirty), uses `sonner` toast on success/error, and routes danger-zone buttons through shadcn `AlertDialog` confirmations. AI provider info comes from the existing `/api/ai-info` endpoint — API keys are never displayed.
+- Created `src/app/superadmin/settings/page.tsx` — server-rendered page gated by `requireAdmin()`; reuses the same `<AdminSidebar>` + sticky header + footer layout pattern as the other admin pages. Falls back to `/superadmin` (bootstrap) or `/dashboard` when not an admin, mirroring the existing access-control flow.
+- Updated `src/components/admin/admin-sidebar.tsx` — added `Settings` nav item (with `Settings` icon from lucide-react) between Projects and Back to User Dashboard.
+
+Lint / Type-check:
+- `bun run lint` → 0 errors, 0 warnings (exit 0).
+- `bunx tsc --noEmit` → 0 errors in `src/` (only pre-existing out-of-scope errors in `examples/` and `skills/`).
+
+Files Created (6):
+- `src/lib/admin/platform-settings.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/app/api/admin/projects-all/route.ts`
+- `src/app/api/admin/reset-roles/route.ts`
+- `src/app/superadmin/settings/page.tsx`
+- `src/components/admin/admin-settings-form.tsx`
+
+Files Modified (2):
+- `prisma/schema.prisma` — added `PlatformSetting` model (key/value + updatedAt).
+- `src/components/admin/admin-sidebar.tsx` — added Settings import + nav item.
+
+Security notes:
+- The PUT endpoint accepts a partial body and silently ignores unknown field names — no risk of an attacker writing arbitrary keys into the DB via this route.
+- Booleans are normalised from any of `true | "true" | 1 | "1" | "on"` → `"true" | "false"`, so HTML form submissions and JSON both work.
+- The Danger Zone endpoints preserve the calling admin's data: `DELETE /api/admin/projects-all` filters `ownerId: { not: admin.id }`, and `PUT /api/admin/reset-roles` filters `id: { not: admin.id }`. This means a single bootstrap admin can wipe the platform without losing their own seed/demo content or locking themselves out.
+- API keys are never fetched, never serialized, and never displayed. The AI provider section reads only from the existing read-only `/api/ai-info` endpoint (which itself only returns `provider` + `model`).
+
+Stage Summary:
+- Platform-wide config now lives in the database (PlatformSetting key/value table) with strong typing on top.
+- Super Admins have a single screen to flip feature flags, change defaults, and perform destructive maintenance ops — all behind confirmation dialogs.
+- All admin routes continue to re-check the DB on every request via `requireAdmin()`, so a demoted admin's existing JWT stops working immediately.

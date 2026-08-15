@@ -135,7 +135,7 @@ export function NodeWrapper({
     const parent = nodes[node.parent]
     if (!parent) return
     const idx = parent.children.indexOf(nodeId)
-    if (idx < parent.children.length - 1) moveNode(nodeId, parent.id, idx + 2)
+    if (idx < parent.children.length - 1) moveNode(nodeId, parent.id, idx + 1)
   }
 
   const handleDuplicate = (e: React.MouseEvent) => {

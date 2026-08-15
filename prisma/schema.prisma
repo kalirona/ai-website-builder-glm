@@ -58,6 +58,14 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// Platform-wide key/value settings for the Super Admin console.
+// Stored as strings — callers parse booleans/numbers on read.
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // A project represents one website owned by a user.
 model Project {
   id           String    @id @default(cuid())

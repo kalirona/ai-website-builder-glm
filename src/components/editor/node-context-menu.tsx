@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/context-menu"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
-import { openAiAssistant } from "./ai-assistant"
+import { focusAiPanel } from "./chat-panel"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -90,7 +90,7 @@ export function NodeContextMenu({
   const handleAskAi = (e: React.MouseEvent) => {
     e.stopPropagation()
     select(nodeId)
-    openAiAssistant(nodeId)
+    focusAiPanel()
   }
 
   const handleCopy = (e: React.MouseEvent) => {
