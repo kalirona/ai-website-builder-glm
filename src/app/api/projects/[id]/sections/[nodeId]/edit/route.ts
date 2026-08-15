@@ -5,7 +5,7 @@ import { safeParse } from "@/lib/utils"
 import { defaultDesignTokens } from "@/lib/editor/types"
 import type { DesignTokens, EditorData, Node } from "@/lib/editor/types"
 import { createBlankEditorData } from "@/lib/editor/node-ops"
-import { aiProvider } from "@/lib/ai/zai-provider"
+import { getAIProvider } from "@/lib/ai/provider-resolver"
 import type { SectionEditInput } from "@/lib/ai/section-schemas"
 import type { AiTreeNode } from "@/lib/ai/provider"
 
@@ -220,7 +220,7 @@ export async function POST(
 
   // ---- 8. Call the AI provider (abstraction, not ZAIProvider directly) ----
   try {
-    const patch = await aiProvider.editSection(aiInput)
+    const patch = await (await getAIProvider()).editSection(aiInput)
     // The provider already Zod-validated the output (incl. type preservation
     // + all Phase 2.2 safety checks). We return it as-is; no persistence.
     return NextResponse.json({ patch })

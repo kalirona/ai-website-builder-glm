@@ -128,12 +128,21 @@ export function ChatPanel() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [providerInfo, setProviderInfo] = useState<{ provider: string; model: string } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Selection safety: capture which node the AI request was for.
   const requestedNodeIdRef = useRef<string | null>(null)
   const requestedNodeTypeRef = useRef<string | null>(null)
+
+  // Dev-only: fetch provider info (no API keys, just name + model).
+  useEffect(() => {
+    fetch("/api/ai-info")
+      .then((r) => r.json())
+      .then((data) => setProviderInfo(data))
+      .catch(() => {})
+  }, [])
 
   const selectedNode = selectedId ? nodes[selectedId] : undefined
   const selectedDef = selectedNode ? getComponent(selectedNode.type) : undefined
@@ -290,9 +299,17 @@ export function ChatPanel() {
     <div className="flex h-full flex-col bg-card">
       {/* Header */}
       <div className="shrink-0 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold">AI Assistant</span>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold">AI Assistant</span>
+          </div>
+          {/* Dev-only provider indicator (no API keys exposed) */}
+          {providerInfo && (
+            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground" title="AI backend (dev indicator)">
+              {providerInfo.provider === "openrouter" ? "OpenRouter" : "ZAI"} · {providerInfo.model}
+            </Badge>
+          )}
         </div>
         {/* Context chip */}
         <div className="mt-2 flex items-center gap-2">

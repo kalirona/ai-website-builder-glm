@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth-guard"
 import { slugify, safeParse } from "@/lib/utils"
 import { createBlankEditorData } from "@/lib/editor/node-ops"
 import { defaultDesignTokens } from "@/lib/editor/types"
-import { aiProvider } from "@/lib/ai/zai-provider"
+import { getAIProvider } from "@/lib/ai/provider-resolver"
 import type { GenerateWebsiteInput } from "@/lib/ai/schemas"
 import type { DesignTokens } from "@/lib/editor/types"
 
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     // If generation inputs were provided, run AI generation.
     if (generate?.businessName && generate?.businessType) {
       try {
-        const result = await aiProvider.generateWebsite({
+        const result = await (await getAIProvider()).generateWebsite({
           businessName: generate.businessName,
           businessType: generate.businessType,
           targetAudience: generate.targetAudience,

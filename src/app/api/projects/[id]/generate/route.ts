@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getCurrentUser } from "@/lib/auth-guard"
-import { aiProvider } from "@/lib/ai/zai-provider"
+import { getAIProvider } from "@/lib/ai/provider-resolver"
 import { defaultDesignTokens } from "@/lib/editor/types"
 import type { DesignTokens } from "@/lib/editor/types"
 import type { GenerateWebsiteInput } from "@/lib/ai/schemas"
@@ -28,7 +28,7 @@ export async function POST(
   await db.project.update({ where: { id }, data: { status: "generating" } })
 
   try {
-    const result = await aiProvider.generateWebsite({
+    const result = await (await getAIProvider()).generateWebsite({
       businessName: body.businessName,
       businessType: body.businessType,
       targetAudience: body.targetAudience,
