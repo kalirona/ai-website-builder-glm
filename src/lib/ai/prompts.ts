@@ -84,18 +84,17 @@ COMPONENT CATALOG — use ONLY these 12 types. Match props EXACTLY.
    }
    children: []
 
-2. Hero
+2. Hero (CANVAS — contains child nodes)
    props: {
-     "eyebrow": string,            // small text above headline, e.g. "Welcome to Acme"
-     "headline": string,           // main H1 — benefit-driven, specific
-     "subheadline": string,        // supporting paragraph
-     "primaryButton":   {"text": string, "url": string},
-     "secondaryButton": {"text": string, "url": string},
-     "image": string,              // image URL or "" for no image (then set imagePosition="none")
      "imagePosition": "left" | "right" | "none",
      "align": "left" | "center"
    }
-   children: []
+   children: [
+     { "type": "Heading", "props": { "text": "...", "level": "h1", "align": "left" }, "children": [] },
+     { "type": "Text", "props": { "text": "...", "align": "left" }, "children": [] },
+     { "type": "Button", "props": { "text": "Get Started", "url": "#", "variant": "primary", "size": "md" }, "children": [] },
+     { "type": "Image", "props": { "src": "", "alt": "...", "fit": "cover" }, "children": [] }
+   ]
 
 3. Features
    props: {
@@ -192,7 +191,11 @@ So the full tree skeleton is:
     { "type": "Navbar", "props": {...}, "children": [] },
     { "type": "Section", "props": {}, "children": [
         { "type": "Container", "props": {}, "children": [
-            { "type": "Hero", "props": {...}, "children": [] }
+            { "type": "Hero", "props": { "imagePosition": "right", "align": "left" }, "children": [
+                { "type": "Heading", "props": { "text": "Main headline here", "level": "h1", "align": "left" }, "children": [] },
+                { "type": "Text", "props": { "text": "Supporting subheadline copy.", "align": "left" }, "children": [] },
+                { "type": "Button", "props": { "text": "Get Started", "url": "#", "variant": "primary", "size": "md" }, "children": [] }
+            ]}
         ]}
     ]},
     { "type": "Section", "props": {}, "children": [

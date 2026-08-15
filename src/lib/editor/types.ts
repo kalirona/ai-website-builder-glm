@@ -109,6 +109,12 @@ export interface RenderProps<P = Record<string, unknown>> {
   children?: React.ReactNode
 }
 
+export interface DefaultChildDef {
+  type: string
+  props?: Record<string, unknown>
+  styles?: Record<string, unknown>
+}
+
 export interface ComponentDefinition<P = Record<string, unknown>> {
   type: string
   name: string
@@ -120,6 +126,13 @@ export interface ComponentDefinition<P = Record<string, unknown>> {
   allowedChildren?: string[] | "*"
   defaultProps: P
   defaultStyles: Record<string, unknown>
+  /**
+   * When a canvas component is added via the palette, these children are
+   * auto-created inside it. Each entry is { type, props?, styles? }. The
+   * child's defaultProps/defaultStyles from the registry are merged in.
+   * If omitted, the canvas starts empty.
+   */
+  defaultChildren?: DefaultChildDef[]
   render: (p: RenderProps<P>) => React.ReactNode
   settings: SettingsField[]
 }

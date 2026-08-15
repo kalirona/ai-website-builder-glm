@@ -152,9 +152,28 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const data: EditorData = { nodes: state.nodes, rootId: state.rootId }
     const node = makeNode(type, { props: def.defaultProps, styles: def.defaultStyles }, parentId)
     const { nodes, id } = addNode(data, node, parentId, index)
+
+    // Auto-create default children for canvas components (e.g. Hero comes with
+    // Heading, Text, Button, Image so each element is independently selectable).
+    let finalNodes = nodes
+    if (def.defaultChildren && def.defaultChildren.length > 0) {
+      const childData: EditorData = { nodes: finalNodes, rootId: state.rootId }
+      for (const childDef of def.defaultChildren) {
+        const childRegDef = getComponent(childDef.type)
+        if (!childRegDef) continue
+        const childNode = makeNode(childDef.type, {
+          props: { ...childRegDef.defaultProps, ...(childDef.props ?? {}) },
+          styles: { ...childRegDef.defaultStyles, ...(childDef.styles ?? {}) },
+        }, id)
+        const res = addNode(childData, childNode, id)
+        childData.nodes = res.nodes
+      }
+      finalNodes = childData.nodes
+    }
+
     set({
       past: [...state.past, snapshot({ nodes: state.nodes, rootId: state.rootId })].slice(-HISTORY_LIMIT),
-      nodes,
+      nodes: finalNodes,
       selectedId: id,
       dirty: true,
       future: [],

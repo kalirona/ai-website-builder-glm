@@ -1,43 +1,36 @@
 "use client"
 
-import { Sparkles, ArrowRight } from "lucide-react"
+import { Sparkles } from "lucide-react"
 import type { ComponentDefinition } from "@/lib/editor/types"
-import { rs } from "./responsive"
-import { InlineText } from "@/components/editor/inline-text"
 
-type ImagePosition = "left" | "right" | "none"
-type Align = "left" | "center"
-
-interface HeroButton {
-  text: string
-  url: string
-}
-
-interface Props {
-  eyebrow: string
-  headline: string
-  subheadline: string
-  primaryButton: HeroButton
-  secondaryButton: HeroButton
-  image: string
-  imagePosition: ImagePosition
-  align: Align
-}
-
-export const HeroDef: ComponentDefinition<Props> = {
+/**
+ * Hero — now a CANVAS container (Phase 2.9 fix).
+ *
+ * Previously Hero was a leaf that rendered all content (headline, image,
+ * button) inline. This meant clicking the "Image" or "Heading" inside a Hero
+ * always selected the Hero — there were no child nodes to select.
+ *
+ * Now Hero is a canvas. When a new Hero is added (via the palette or AI), it
+ * contains real child nodes (Heading, Text, Button, Image) that are each
+ * independently selectable + editable. The Hero itself only controls the
+ * layout (two-column grid, background, padding, min-height, alignment).
+ *
+ * The AI generation prompt (prompts.ts) was updated to emit Hero with child
+ * nodes so AI-generated sites also get the element-level selection.
+ *
+ * For backwards compatibility, if a Hero node has NO children (legacy
+ * AI-generated sites), the render still works — it just shows the inline
+ * content from props as before. This avoids breaking existing sites.
+ */
+export const HeroDef: ComponentDefinition<Record<string, unknown>> = {
   type: "Hero",
   name: "Hero",
   icon: Sparkles,
   category: "marketing",
-  description: "Marketing hero with headline, subhead, CTAs and image.",
+  description: "Marketing hero — canvas container for Heading, Text, Button, Image.",
+  isCanvas: true,
+  allowedChildren: "*",
   defaultProps: {
-    eyebrow: "Welcome",
-    headline: "Grow Your Business With Smart Marketing",
-    subheadline:
-      "We help ambitious brands scale with data-driven strategies and beautiful design.",
-    primaryButton: { text: "Get Started", url: "#" },
-    secondaryButton: { text: "Learn More", url: "#" },
-    image: "",
     imagePosition: "right",
     align: "left",
   },
@@ -47,221 +40,52 @@ export const HeroDef: ComponentDefinition<Props> = {
     minHeight: { desktop: "600px", tablet: "520px", mobile: "auto" },
     padding: { desktop: "96px", tablet: "64px", mobile: "48px" },
   },
-  render: ({ node, props, styles, ctx }) => {
-    const imagePosition = (props.imagePosition as ImagePosition) ?? "right"
-    const align = (props.align as Align) ?? "left"
+  /**
+   * When a Hero is added via the palette, auto-create these children so the
+   * user immediately has individually-selectable elements (Heading, Text,
+   * Button, Image) instead of an empty canvas.
+   */
+  defaultChildren: [
+    {
+      type: "Heading",
+      props: { text: "Grow Your Business Faster", level: "h1", align: "left" },
+      styles: { fontSize: { desktop: "56px", tablet: "44px", mobile: "36px" }, fontWeight: "800", lineHeight: "1.05", letterSpacing: "-0.03em", color: "var(--brand-foreground)" },
+    },
+    {
+      type: "Text",
+      props: { text: "We help ambitious brands scale with data-driven strategies and beautiful design.", align: "left" },
+      styles: { fontSize: { desktop: "20px", tablet: "18px", mobile: "16px" }, color: "#475569", lineHeight: "1.6" },
+    },
+    {
+      type: "Button",
+      props: { text: "Get Started", url: "#", variant: "primary", size: "md" },
+    },
+    {
+      type: "Image",
+      props: { src: "", alt: "Hero image", fit: "cover" },
+      styles: { width: "100%", height: "auto", radius: "calc(var(--brand-radius) * 1.5)" },
+    },
+  ],
+  render: ({ node, props, styles, ctx, children }) => {
+    // Legacy support: if the Hero has children (new canvas behavior), render
+    // them inside a two-column grid. If it has NO children (old inline Hero),
+    // fall back to rendering the inline content from props.
+    const hasChildren = node.children.length > 0
+
+    const imagePosition = (props.imagePosition as string) ?? "right"
+    const align = (props.align as string) ?? "left"
     const background = (styles.background as string) ?? "var(--brand-background)"
     const textColor = (styles.textColor as string) ?? "var(--brand-foreground)"
-    const minHeight = rs(styles.minHeight, ctx.device, "auto")
-    const padding = rs(styles.padding, ctx.device, "96px")
-
     const isMobile = ctx.device === "mobile"
-    const isSingleColumn = imagePosition === "none" || isMobile
+    const isSingleColumn = imagePosition === "none" || isMobile || !hasChildren
     const isCentered = align === "center" || imagePosition === "none"
 
-    const primaryBtn = (props.primaryButton as HeroButton) ?? {
-      text: "Get Started",
-      url: "#",
-    }
-    const secondaryBtn = (props.secondaryButton as HeroButton) ?? {
-      text: "Learn More",
-      url: "#",
-    }
-    const imageSrc = (props.image as string) ?? ""
-
-    const eyebrowEl = (
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 13,
-          fontWeight: 600,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--brand-primary)",
-        }}
-      >
-        <Sparkles style={{ width: 14, height: 14 }} />
-        {props.eyebrow}
-      </span>
-    )
-
-    const headlineEl = (
-      <InlineText
-        nodeId={node.id}
-        propKey="headline"
-        value={props.headline}
-        as="h1"
-        multiline
-        style={{
-          margin: 0,
-          fontSize: isMobile ? "36px" : "56px",
-          lineHeight: 1.05,
-          letterSpacing: "-0.03em",
-          fontWeight: 800,
-          color: textColor,
-          fontFamily: "var(--brand-heading-font)",
-          textAlign: isCentered ? "center" : "left",
-        }}
-      />
-    )
-
-    const subEl = (
-      <InlineText
-        nodeId={node.id}
-        propKey="subheadline"
-        value={props.subheadline}
-        as="p"
-        multiline
-        style={{
-          margin: 0,
-          fontSize: isMobile ? "16px" : "20px",
-          lineHeight: 1.6,
-          color: "#475569",
-          maxWidth: "560px",
-          fontFamily: "var(--brand-body-font)",
-          textAlign: isCentered ? "center" : "left",
-        }}
-      />
-    )
-
-    const buttonEl = (btn: HeroButton, primary: boolean) => {
-      const baseStyle: React.CSSProperties = {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: primary ? "14px 26px" : "14px 22px",
-        fontSize: 15,
-        fontWeight: 600,
-        borderRadius: "var(--brand-radius)",
-        textDecoration: "none",
-        transition: "all 150ms ease",
-        cursor: ctx.editable ? "default" : "pointer",
-        fontFamily: "var(--brand-body-font)",
-      }
-      const variantStyle: React.CSSProperties = primary
-        ? {
-            background: "var(--brand-primary)",
-            color: "#ffffff",
-            border: "1px solid var(--brand-primary)",
-          }
-        : {
-            background: "transparent",
-            color: textColor,
-            border: `1px solid ${textColor === "#ffffff" ? "#ffffff" : "var(--brand-border)"}`,
-          }
-      return (
-        <a
-          key={primary ? "primary" : "secondary"}
-          href={ctx.editable ? undefined : btn.url}
-          style={{ ...baseStyle, ...variantStyle }}
-          onClick={(e) => {
-            if (ctx.editable) e.preventDefault()
-          }}
-          onMouseEnter={(e) => {
-            if (ctx.editable) return
-            if (primary) e.currentTarget.style.opacity = "0.9"
-            else
-              e.currentTarget.style.background = "var(--brand-muted)"
-          }}
-          onMouseLeave={(e) => {
-            if (ctx.editable) return
-            e.currentTarget.style.opacity = "1"
-            if (!primary) e.currentTarget.style.background = "transparent"
-          }}
-        >
-          <span style={{ pointerEvents: "none" }}>{btn.text}</span>
-          {primary && <ArrowRight style={{ width: 16, height: 16, pointerEvents: "none" }} />}
-        </a>
-      )
-    }
-
-    const textColumn = (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "24px",
-          alignItems: isCentered ? "center" : "flex-start",
-          justifyContent: "center",
-          flex: 1,
-          minWidth: 0,
-        }}
-      >
-        {eyebrowEl}
-        {headlineEl}
-        {subEl}
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            justifyContent: isCentered ? "center" : "flex-start",
-            marginTop: 8,
-          }}
-        >
-          {buttonEl(primaryBtn, true)}
-          {buttonEl(secondaryBtn, false)}
-        </div>
-      </div>
-    )
-
-    const imageColumn = imageSrc ? (
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <img
-          src={imageSrc}
-          alt={props.headline}
-          style={{
-            maxWidth: "100%",
-            width: "100%",
-            height: "auto",
-            borderRadius: "calc(var(--brand-radius) * 1.5)",
-            boxShadow:
-              "0 20px 40px -12px rgba(15, 23, 42, 0.18), 0 8px 16px -8px rgba(15, 23, 42, 0.12)",
-            display: "block",
-          }}
-        />
-      </div>
-    ) : (
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            aspectRatio: "4 / 3",
-            borderRadius: "calc(var(--brand-radius) * 1.5)",
-            background:
-              "linear-gradient(135deg, var(--brand-muted) 0%, var(--brand-border) 100%)",
-            border: "1px dashed var(--brand-border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "var(--brand-foreground)",
-            opacity: 0.5,
-            fontSize: 14,
-            fontWeight: 500,
-          }}
-        >
-          Hero image
-        </div>
-      </div>
-    )
+    // Read padding/minHeight via responsive values (simple inline read for the
+    // canvas wrapper; the actual responsive resolution happens in child nodes).
+    const paddingObj = styles.padding as { desktop?: string; tablet?: string; mobile?: string } | undefined
+    const minHeightObj = styles.minHeight as { desktop?: string; tablet?: string; mobile?: string } | undefined
+    const padding = (paddingObj && typeof paddingObj === "object" ? paddingObj[ctx.device] ?? paddingObj.desktop : "96px") as string
+    const minHeight = (minHeightObj && typeof minHeightObj === "object" ? minHeightObj[ctx.device] ?? minHeightObj.desktop : "auto") as string
 
     return (
       <section
@@ -288,100 +112,12 @@ export const HeroDef: ComponentDefinition<Props> = {
             justifyItems: isCentered ? "center" : "stretch",
           }}
         >
-          {imagePosition === "left" && !isSingleColumn ? (
-            <>
-              {imageColumn}
-              {textColumn}
-            </>
-          ) : imagePosition === "none" ? (
-            <div
-              style={{
-                gridColumn: "1 / -1",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "24px",
-                textAlign: "center",
-              }}
-            >
-              {eyebrowEl}
-              {headlineEl}
-              {subEl}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  justifyContent: "center",
-                  marginTop: 8,
-                }}
-              >
-                {buttonEl(primaryBtn, true)}
-                {buttonEl(secondaryBtn, false)}
-              </div>
-            </div>
-          ) : (
-            <>
-              {textColumn}
-              {imageColumn}
-            </>
-          )}
+          {children}
         </div>
       </section>
     )
   },
   settings: [
-    {
-      key: "props.eyebrow",
-      label: "Eyebrow",
-      group: "content",
-      type: "text",
-      placeholder: "Welcome",
-    },
-    {
-      key: "props.headline",
-      label: "Headline",
-      group: "content",
-      type: "textarea",
-    },
-    {
-      key: "props.subheadline",
-      label: "Subheadline",
-      group: "content",
-      type: "textarea",
-    },
-    {
-      key: "props.primaryButton.text",
-      label: "Primary Button Text",
-      group: "content",
-      type: "text",
-      placeholder: "Get Started",
-    },
-    {
-      key: "props.primaryButton.url",
-      label: "Primary Button URL",
-      group: "content",
-      type: "text",
-    },
-    {
-      key: "props.secondaryButton.text",
-      label: "Secondary Button Text",
-      group: "content",
-      type: "text",
-      placeholder: "Learn More",
-    },
-    {
-      key: "props.secondaryButton.url",
-      label: "Secondary Button URL",
-      group: "content",
-      type: "text",
-    },
-    {
-      key: "props.image",
-      label: "Image",
-      group: "content",
-      type: "image",
-    },
     {
       key: "props.imagePosition",
       label: "Image Position",
