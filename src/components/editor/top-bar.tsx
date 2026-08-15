@@ -23,6 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { CodeViewToggle } from "./code-view"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import type { Device } from "@/lib/editor/types"
@@ -167,6 +168,7 @@ export function TopBar({
         </div>
 
         <div className="flex items-center gap-1.5">
+          <CodeViewToggle />
           <Button
             variant="ghost"
             size="sm"

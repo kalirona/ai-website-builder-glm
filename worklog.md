@@ -752,3 +752,78 @@ Files Modified:
 Stage Summary:
 - All 7 issues resolved. Editor right-panel now updates the canvas live as the user types, with a single undo entry per text burst. 7 new components (Columns, Pricing, FAQ, LogoCloud, Divider, Spacer, Video, Stat) bring the registry to 19 components. PagesTab can add new pages via POST /api/pages/[projectId]. Dashboard has a persistent sidebar with Dashboard/Websites/Settings/Logout, and the new Settings page lets users update their display name. Preview page has a Back to Editor button. Drag-and-drop reliability verified — all guarantees already in place. Lint and TypeScript clean.
 
+
+---
+
+Task ID: 4.x
+Agent: full-stack-developer (ux-features)
+Task: Add 10 GrapesJS-style UX features to the visual editor
+
+Work Log:
+- Inspected existing editor architecture (Zustand flat-node store, NodeRenderer single-renderer, registry pattern, shadcn/ui, @dnd-kit, lucide-react, react-syntax-highlighter all confirmed available).
+- Built all 10 features additively — no changes to the store, NodeRenderer, registry pattern, or AI pipeline.
+
+### Feature 1 — Right-click context menu
+- Created `src/components/editor/node-context-menu.tsx` using shadcn `ContextMenu`. Wraps each non-root node via `asChild` so the existing root div + ref + handlers stay intact. Items: Duplicate (⌘D), Delete (destructive), Move up, Move down, separator, Ask AI (amber), separator, Copy (toast "Coming soon"), Paste (disabled). Stop-propagation on `onContextMenu` so the canvas deselect doesn't fire; selects the node on right-click so the menu feels attached.
+- `node-wrapper.tsx`: wraps the rendered div in `<NodeContextMenu>` for non-root nodes; root is excluded so right-click on the page background still bubbles.
+
+### Feature 2 — Style manager redesign
+- Rewrote `src/components/editor/right-panel.tsx` with 7 collapsible sections (Content / Layout / Background / Borders / Spacing / Typography / Effects), each with an icon + count badge. Heuristic `sectionForField` maps each field's `group` + key to the most appropriate section (e.g. `styles.background` → Background, `styles.textColor` → Typography, padding/margin/gap → Spacing). Added a device tab bar at the top (Desktop/Tablet/Mobile) that drives `setDevice` in the store — synced with the top-bar toggle and the responsive fields' per-row device pickers.
+
+### Feature 3 — Block categories with icons (Add panel)
+- Rewrote `ComponentsTab` in `left-sidebar.tsx` to bucket components into 4 GrapesJS-style categories: Sections (marketing), Layout (Section/Container/Columns + Divider + Spacer override), Basic (Heading/Text/Button), Media (Image/Video). Each category header has icon + count + chevron; default Sections expanded, others collapsed. Searching expands all categories with matches. Stable alphabetical sort within each.
+
+### Feature 4 — Double-click to edit
+- Added `onDoubleClick` handler to `NodeWrapper`. If the component has text/textarea/responsive-text settings fields (heuristic via `hasInlineTextFields`), double-click selects the node and focuses the first `[data-inline-text="true"]` descendant (via `requestAnimationFrame` so the selection-driven re-render doesn't blow away focus). Caret placed at end of any existing text. Canvas-only components (Section/Container/Spacer/Columns) just select on double-click. Stops propagation so canvas deselect doesn't fire.
+
+### Feature 5 — Rulers / guides
+- Created `src/components/editor/rulers.tsx` with `RulerBar` (orientation: horizontal|vertical) and `RulerCorner`. Rulers are siblings of the scroll area (not overlays) so they stay visible while content scrolls. The inner tick track is translated by `-scrollLeft`/`-scrollTop` so tick numbers correspond to the actual content position. Ticks every 50px with major labels every 100px. ~20px tall/wide as spec'd.
+- `canvas.tsx`: restructured scroll area into a 2x2 grid (corner | horizontal ruler / vertical ruler | scrollable content). Tracks scrollable content size via `ResizeObserver` so the tick track is long enough. Re-measures when nodes/device change.
+
+### Feature 6 — Asset manager
+- Created `src/components/editor/asset-manager.tsx` — a `Dialog` with two tabs: Library (grid of ~30 hardcoded Unsplash URLs across 6 categories: business/tech/food/nature/people/abstract, with search + category filter + hover labels + selected checkmark) and URL (paste any image URL with validation + live preview). Module-level open state mirrors the `ai-assistant.tsx` pattern — any ImageInput calls `openAssetManager({ currentValue, onChange })` and the picker writes the URL back via `onChange`. Includes a `// TODO: connect to Directus media library` marker for Phase 3.
+- `controls.tsx` `ImageInput`: replaced the bare `<img>` preview with a clickable thumbnail button + added a "Browse" button next to the URL input. Both open the asset manager.
+- `editor-shell.tsx`: mounts `<AssetManager />` once alongside `<AiAssistant />`.
+
+### Feature 7 — Code view (read-only HTML)
+- Created `src/components/editor/code-view.tsx` exporting `CodeViewToggle`. Wraps `<NodeRenderer>` in an `EditorContextProvider` with `editable: false` (so NodeRenderer skips the NodeWrapper / selection chrome), calls `renderToStaticMarkup` from `react-dom/server` to get a single HTML string, wraps with a minimal HTML5 doctype + `<style>` block injecting the design-token CSS vars so any `var(--brand-*)` references resolve standalone. Lightweight `indentHtml` pretty-prints the output (newline + 2 spaces per nesting level). Shown in a `Sheet` (right side, max-w-2xl) with `react-syntax-highlighter` (Prism + oneDark) syntax highlighting. Copy button copies raw HTML to clipboard with toast feedback.
+- `top-bar.tsx`: mounted `<CodeViewToggle />` immediately before the Preview button.
+
+### Feature 8 — Device-specific styling tabs
+- Enhanced `controls.tsx` `ResponsiveTextInput`: added a `DevicePicker` (D/T/M icon buttons in a row) above the 3 inputs. Clicking a device calls `setDevice` on the store — synced with the canvas viewport, the top-bar device toggle, and the right-panel device tab bar. Active device's input gets `ring-2 ring-primary` and full opacity; others dimmed to opacity-50. Wrapped the whole thing in a `bg-muted/40 p-2 rounded-md` block for visual grouping.
+- Enhanced `ColorInput`: added a `COLOR_SWATCHES` row (12 preset brand/neutral colors) above the color picker; selected swatch shows a `ring-2 ring-primary ring-offset-1`. Click applies the color immediately.
+
+### Feature 9 — Drag from Layers panel
+- Refactored `LayersTab` in `left-sidebar.tsx` into a separate `DndContext` (with `PointerSensor`, distance 4) wrapping a recursive `renderNode` that delegates each row to a new `LayerRow` component. Each row uses `useDraggable` (id `layer:${nodeId}`) + `useDroppable` (id `layer-drop:${nodeId}`), both disabled for the root. The grip handle (`GripVertical`) is `opacity-0 group-hover:opacity-100` so click-to-select still works on the rest of the row. Drag-over computes position (before/after/inside based on cursor Y over the row, with the middle 40% reserved for "inside" on canvas nodes). `handleDragEnd` calls `moveNode(draggedId, parentOrTargetId, index)` with the same prev-index-shift correction the canvas uses; refuses to drop a node into its own descendant (`isDescendantOf` walk). Drop indicators: emerald line above/below for before/after, emerald ring for inside. Expands the new parent on drop so the moved node is visible. Existing expand/collapse + auto-expand-ancestors + scroll-into-view behaviors preserved.
+
+### Feature 10 — Selection badge
+- Added an always-visible floating badge to `NodeWrapper` (selected + non-root only): absolute `-top-5 left-0`, `text-[10px] px-1.5 py-0.5 rounded`, white text, brand-primary background via inline `style={{ background: "var(--brand-primary, #6366f1)" }}`. Shows the component name (e.g. "Hero", "Features"). IN ADDITION to the hover toolbar — toolbar appears on hover, badge is always on when selected.
+
+## Files created (6)
+- `src/components/editor/node-context-menu.tsx`
+- `src/components/editor/rulers.tsx`
+- `src/components/editor/asset-manager.tsx`
+- `src/components/editor/code-view.tsx`
+- (no other new files)
+
+## Files modified (6)
+- `src/components/editor/node-wrapper.tsx` — Features 1, 4, 10 (context menu wrap, double-click-to-edit, selection badge)
+- `src/components/editor/canvas.tsx` — Feature 5 (rulers integration + scroll ref + content-size tracking)
+- `src/components/editor/controls.tsx` — Features 6, 8 (ImageInput Browse button + asset manager hook, ResponsiveTextInput device tab bar, ColorInput swatches)
+- `src/components/editor/right-panel.tsx` — Feature 2 (7 collapsible sections + device tab bar)
+- `src/components/editor/left-sidebar.tsx` — Features 3, 9 (block categories, Layers drag-and-drop)
+- `src/components/editor/top-bar.tsx` — Feature 7 (CodeViewToggle mount)
+- `src/components/editor/editor-shell.tsx` — Feature 6 (AssetManager mount)
+
+## Verification
+- `bun run lint` → **0 errors, 0 warnings** (exit 0)
+- `bunx tsc --noEmit` → **0 errors in `src/`** (only pre-existing errors in `examples/` and `skills/` directories, which are out of scope)
+- Dev server compiles `/editor/[projectId]` route cleanly (5.1s compile, 307 redirect to login since unauthenticated — expected).
+
+## Architecture integrity
+- Zustand store: untouched (only consumed existing actions: `removeNode`, `duplicateNode`, `moveNode`, `select`, `setDevice`, `updateProps`, `updateStyles`, `updatePropsLive`, `updateStylesLive`, `commitHistory`).
+- Flat node map: untouched.
+- NodeRenderer: untouched (still the single renderer for editor/preview/publish).
+- Registry pattern: untouched (19 components still register via `src/components/website/index.ts`).
+- AI pipeline: untouched (`ai-assistant.tsx` `openAiAssistant(nodeId)` is reused by the context menu).
+- No new npm dependencies added — everything used (`@dnd-kit/core`, `react-syntax-highlighter`, `react-dom/server`, all shadcn/ui components, lucide-react icons) was already installed.

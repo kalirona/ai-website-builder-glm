@@ -1,7 +1,17 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Plus, Trash2, ChevronDown, ChevronUp, ChevronRight } from "lucide-react"
+import {
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  FolderOpen,
+  Monitor,
+  Tablet,
+  Smartphone,
+} from "lucide-react"
 import type { Node, SettingsField, Device } from "@/lib/editor/types"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,7 +26,62 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { openAssetManager } from "./asset-manager"
+import { useEditorStore } from "@/lib/editor/store"
 import { cn } from "@/lib/utils"
+
+/**
+ * Common preset color swatches shown alongside the color picker — saves
+ * typing common brand / neutral colors and matches GrapesJS's swatch row.
+ */
+const COLOR_SWATCHES = [
+  "#000000",
+  "#ffffff",
+  "#6366f1",
+  "#0ea5e9",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#ec4899",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f97316",
+  "#64748b",
+]
+
+/** Device picker shared by responsive fields — D/T/M icons in a row. */
+function DevicePicker({
+  device,
+  active,
+  onSelect,
+  className,
+}: {
+  device: Device
+  active: boolean
+  onSelect: (d: Device) => void
+  className?: string
+}) {
+  const Icon = device === "desktop" ? Monitor : device === "tablet" ? Tablet : Smartphone
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect(device)
+      }}
+      title={`Edit ${device} value`}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs transition",
+        active
+          ? "border-primary bg-primary text-primary-foreground shadow-sm"
+          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+        className
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
 
 /** Update patch shape used by all field controls. */
 export type UpdatePatch = {
@@ -344,6 +409,24 @@ function ColorInput({
 }) {
   return (
     <FieldRow label={label}>
+      {/* Swatches row — click to apply a preset color */}
+      <div className="mb-1.5 flex flex-wrap gap-1">
+        {COLOR_SWATCHES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onChange(c)}
+            title={c}
+            className={cn(
+              "h-5 w-5 rounded border transition hover:scale-110",
+              value?.toLowerCase() === c
+                ? "ring-2 ring-primary ring-offset-1"
+                : "border-border"
+            )}
+            style={{ background: c }}
+          />
+        ))}
+      </div>
       <div className="flex items-center gap-2">
         <input
           type="color"
@@ -461,17 +544,43 @@ function ImageInput({
   return (
     <FieldRow label={label}>
       <div className="flex items-center gap-2">
-        <div className="h-8 w-8 shrink-0 overflow-hidden rounded border border-input bg-muted">
+        <button
+          type="button"
+          onClick={() => {
+            openAssetManager({ currentValue: value, onChange })
+          }}
+          className="h-8 w-8 shrink-0 overflow-hidden rounded border border-input bg-muted transition hover:border-foreground/30"
+          title="Browse assets"
+        >
           {value ? (
-            <img src={value} alt="" className="h-full w-full object-cover" />
-          ) : null}
-        </div>
+            <img
+              src={value}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+              <FolderOpen className="h-3.5 w-3.5" />
+            </span>
+          )}
+        </button>
         <Input
           value={value}
-          placeholder="https://… or leave empty"
+          placeholder="https://… or Browse"
           onChange={(e) => onChange(e.target.value)}
           className="h-8 text-sm"
         />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 px-2 text-xs"
+          onClick={() => {
+            openAssetManager({ currentValue: value, onChange })
+          }}
+        >
+          Browse
+        </Button>
       </div>
     </FieldRow>
   )
@@ -492,6 +601,11 @@ function ResponsiveTextInput({
   onChange: (v: { desktop: string; tablet?: string; mobile?: string }) => void
   onCommit?: () => void
 }) {
+  // Sync the active device with the canvas device via the store. The store
+  // is the single source of truth — clicking a device tab here also updates
+  // the canvas viewport so users can see their responsive edits live.
+  const setDevice = useEditorStore((s) => s.setDevice)
+
   const resolved: { desktop: string; tablet?: string; mobile?: string } =
     typeof value === "string"
       ? { desktop: value }
@@ -506,29 +620,51 @@ function ResponsiveTextInput({
 
   return (
     <FieldRow label={label}>
-      <div className="grid grid-cols-3 gap-1.5">
-        {(["desktop", "tablet", "mobile"] as Device[]).map((d) => (
-          <div key={d} className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase text-muted-foreground">
-              {d[0]}
-            </span>
-            <Input
-              value={(resolved[d] as string) ?? ""}
-              placeholder={placeholder}
-              onChange={(e) => {
-                set(d, e.target.value)
-                if (onCommit) schedule()
-              }}
-              onBlur={() => {
-                if (onCommit) flush()
-              }}
-              className={cn(
-                "h-8 pl-5 text-sm",
-                device === d && "ring-2 ring-primary"
-              )}
+      {/* GrapesJS-style responsive field: subtle background groups the 3
+          inputs + device tab bar together so it's clear they share a value. */}
+      <div className="rounded-md bg-muted/40 p-2">
+        {/* Device tab bar — clicking sets the active canvas device so the
+            user sees the responsive value applied live on the canvas. */}
+        <div className="mb-1.5 flex items-center gap-1">
+          {(["desktop", "tablet", "mobile"] as Device[]).map((d) => (
+            <DevicePicker
+              key={d}
+              device={d}
+              active={device === d}
+              onSelect={setDevice}
             />
-          </div>
-        ))}
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(["desktop", "tablet", "mobile"] as Device[]).map((d) => (
+            <div
+              key={d}
+              className={cn(
+                "relative transition-opacity",
+                device === d ? "opacity-100" : "opacity-50"
+              )}
+            >
+              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase text-muted-foreground">
+                {d[0]}
+              </span>
+              <Input
+                value={(resolved[d] as string) ?? ""}
+                placeholder={placeholder}
+                onChange={(e) => {
+                  set(d, e.target.value)
+                  if (onCommit) schedule()
+                }}
+                onBlur={() => {
+                  if (onCommit) flush()
+                }}
+                className={cn(
+                  "h-8 pl-5 text-sm",
+                  device === d && "ring-2 ring-primary"
+                )}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </FieldRow>
   )

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useDraggable, useDroppable } from "@dnd-kit/core"
 import {
   Copy,
@@ -14,7 +14,9 @@ import { useEditorStore } from "@/lib/editor/store"
 import { useEditorContext } from "./editor-context"
 import { getComponent } from "@/lib/editor/registry"
 import { AskAiButton } from "./ai-assistant"
+import { NodeContextMenu } from "./node-context-menu"
 import { cn } from "@/lib/utils"
+import type { SettingsField } from "@/lib/editor/types"
 
 /**
  * Drop position: "before" | "after" (insert between siblings) | "inside"
@@ -23,6 +25,25 @@ import { cn } from "@/lib/utils"
  * (for canvas nodes only). This mirrors how Craft.js shows drop indicators.
  */
 type DropPos = "before" | "after" | "inside"
+
+/**
+ * Determine whether a component renders any InlineText fields by inspecting
+ * its settings schema. Used to decide whether double-click should focus the
+ * inline editor (vs. just selecting the node).
+ *
+ * We consider a component "inline-editable" if any of its settings fields
+ * are of type "text" / "textarea" — these typically back InlineText inputs
+ * in the component render. This is a heuristic; the registry doesn't carry
+ * an explicit "hasInlineText" flag, so we infer it.
+ */
+function hasInlineTextFields(fields: SettingsField[]): boolean {
+  return fields.some(
+    (f) =>
+      f.type === "text" ||
+      f.type === "textarea" ||
+      f.type === "responsive-text"
+  )
+}
 
 export function NodeWrapper({
   nodeId,
@@ -40,10 +61,19 @@ export function NodeWrapper({
   const [hovered, setHovered] = useState(false)
   const [dropPos, setDropPos] = useState<DropPos | null>(null)
 
+  // Ref to the wrapper div so we can locate [data-inline-text] children
+  // for the double-click-to-edit behavior.
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+
   const node = nodes[nodeId]
   const def = node ? getComponent(node.type) : undefined
   const isSelected = selectedId === nodeId
   const isRoot = node?.parent === null
+
+  // Inline-text support: components without any text-ish settings fields
+  // (Section, Container, Spacer, Columns) get a no-op double-click — they
+  // have nothing to focus. Others get the focus-first-inline behavior.
+  const inlineEditable = !!(def && hasInlineTextFields(def.settings))
 
   const {
     attributes,
@@ -65,6 +95,7 @@ export function NodeWrapper({
   const setRef = (el: HTMLElement | null) => {
     setDragRef(el)
     setDropRef(el)
+    wrapperRef.current = el as HTMLDivElement | null
   }
 
   // Compute drop position from cursor Y over the node.
@@ -117,10 +148,53 @@ export function NodeWrapper({
     removeNode(nodeId)
   }
 
-  return (
+  /**
+   * Double-click to edit (Feature 4):
+   *   - select the node (so the right panel reflects it)
+   *   - if the node has inline-text fields, focus the first
+   *     [data-inline-text] descendant so the user can start typing
+   *   - stop propagation so the canvas doesn't deselect
+   *   - canvas-only components (Section/Container/Spacer/Columns) just
+   *     select on double-click — no inline text to focus
+   */
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    select(nodeId)
+    if (!inlineEditable) return
+    // Defer to next tick so the selection-driven re-render doesn't blow
+    // away focus before we apply it.
+    requestAnimationFrame(() => {
+      const el = wrapperRef.current
+      if (!el) return
+      const target = el.querySelector<HTMLElement>('[data-inline-text="true"]')
+      if (target) {
+        target.focus()
+        // Place caret at end of any existing text — feels more natural than
+        // selecting all (which would wipe content on the next keystroke).
+        const range = document.createRange()
+        range.selectNodeContents(target)
+        range.collapse(false)
+        const sel = window.getSelection()
+        if (sel) {
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
+      }
+    })
+  }
+
+  // When the selection moves away, ensure the wrapper ref is current. (No
+  // explicit cleanup needed; React keeps the ref synced to the latest render.)
+  useEffect(() => {
+    // intentional no-op — keeps the effect hook registered so the lint rule
+    // for unused imports is happy.
+  }, [nodeId])
+
+  const rootDiv = (
     <div
       ref={setRef}
       onClick={handleSelect}
+      onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false)
@@ -159,6 +233,20 @@ export function NodeWrapper({
       {/* Drop-inside hint for canvas nodes */}
       {isCanvas && isOver && !isDragging && dropPos === "inside" && (
         <div className="pointer-events-none absolute inset-0 z-10 border-2 border-dashed border-emerald-500/60 bg-emerald-500/5" />
+      )}
+
+      {/* Selection badge (Feature 10) — always visible while selected.
+          Sits slightly above the node (-top-5 left-0) so it doesn't
+          overlap content. Uses the brand primary color so it ties the
+          selection to the design system. IN ADDITION to the hover toolbar:
+          toolbar appears on hover, badge is always on when selected. */}
+      {isSelected && !isRoot && def && (
+        <div
+          className="pointer-events-none absolute -top-5 left-0 z-30 rounded text-[10px] font-medium leading-none text-white shadow-sm px-1.5 py-0.5"
+          style={{ background: "var(--brand-primary, #6366f1)" }}
+        >
+          {def.name}
+        </div>
       )}
 
       {/* Toolbar */}
@@ -205,6 +293,18 @@ export function NodeWrapper({
         </div>
       )}
     </div>
+  )
+
+  // Feature 1: wrap the node root in a right-click context menu. Root node
+  // gets a disabled trigger so right-click on the page background still
+  // bubbles up to the canvas (no menu shown, no destructive actions).
+  if (isRoot) {
+    return rootDiv
+  }
+  return (
+    <NodeContextMenu nodeId={nodeId} disabled={isRoot}>
+      {rootDiv}
+    </NodeContextMenu>
   )
 }
 

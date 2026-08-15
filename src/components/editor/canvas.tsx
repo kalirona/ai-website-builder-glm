@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -13,6 +13,7 @@ import {
 import { useEditorStore } from "@/lib/editor/store"
 import { EditorContextProvider } from "./editor-context"
 import { NodeRenderer } from "./node-renderer"
+import { RulerBar, RulerCorner } from "./rulers"
 import { tokensToCssVars, deviceWidth } from "@/lib/editor/design-tokens"
 import { getComponent } from "@/lib/editor/registry"
 import { isDescendant, applySectionMerge, type PatchTreeNode } from "@/lib/editor/node-ops"
@@ -49,6 +50,28 @@ export function EditorCanvas() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
+
+  // Ref + state for the scrollable canvas area so the rulers can subscribe
+  // to its scroll position and stay in sync.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [contentSize, setContentSize] = useState<{ w: number; h: number }>({
+    w: 0,
+    h: 0,
+  })
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const measure = () =>
+      setContentSize({
+        w: Math.max(el.scrollWidth, el.clientWidth),
+        h: Math.max(el.scrollHeight, el.clientHeight),
+      })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    // also re-measure when nodes change (the inner content can grow/shrink)
+    return () => ro.disconnect()
+  }, [nodes, device])
 
   const width = deviceWidth(device)
   const data = { nodes, rootId }
@@ -196,22 +219,44 @@ export function EditorCanvas() {
           <div className="shrink-0 border-b bg-card px-4 py-1.5" onClick={(e) => e.stopPropagation()}>
             <Breadcrumb />
           </div>
-          {/* Scrollable canvas area */}
-          <div className="flex-1 overflow-auto p-4 sm:p-8">
-            <div
-              className={cn(
-                "mx-auto shadow-xl transition-all duration-200",
-                width ? "rounded-xl" : "rounded-xl w-full max-w-[1280px]"
-              )}
-              style={{
-                width: width ? `${width}px` : "100%",
-                maxWidth: width ? `${width}px` : "1280px",
-                background: designTokens.background,
-                ...tokensToCssVars(designTokens),
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <NodeRenderer nodeId={rootId} />
+          {/* Canvas area with rulers (Feature 5).
+              Layout: corner | horizontal ruler on top row, vertical ruler |
+              scrollable content on bottom row. Rulers stay pinned (siblings
+              of the scroll area) while their inner tick tracks translate to
+              reflect the current scroll position. */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0">
+              <RulerCorner />
+              <RulerBar
+                scrollRef={scrollRef}
+                orientation="horizontal"
+                contentLength={contentSize.w}
+                className="flex-1"
+              />
+            </div>
+            <div className="flex min-h-0 flex-1">
+              <RulerBar
+                scrollRef={scrollRef}
+                orientation="vertical"
+                contentLength={contentSize.h}
+              />
+              <div ref={scrollRef} className="min-w-0 flex-1 overflow-auto p-4 sm:p-8">
+                <div
+                  className={cn(
+                    "mx-auto shadow-xl transition-all duration-200",
+                    width ? "rounded-xl" : "rounded-xl w-full max-w-[1280px]"
+                  )}
+                  style={{
+                    width: width ? `${width}px` : "100%",
+                    maxWidth: width ? `${width}px` : "1280px",
+                    background: designTokens.background,
+                    ...tokensToCssVars(designTokens),
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <NodeRenderer nodeId={rootId} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
