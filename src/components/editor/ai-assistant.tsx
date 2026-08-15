@@ -447,22 +447,27 @@ export function AiAssistant() {
   )
 }
 
-/** The toolbar button that opens the assistant for a given node. */
+/** The toolbar button that opens the assistant for a given node.
+ *
+ * Phase 2.9A: instead of opening a modal, this now switches the right panel
+ * to the AI Assistant tab (focusAiPanel). The chat is persistent in the
+ * right panel — no modal. The selected node becomes the chat context.
+ */
 export function AskAiButton({ nodeId, disabled }: { nodeId: string; disabled?: boolean }) {
   const select = useEditorStore((s) => s.select)
+  // Lazy import to avoid a circular dependency at module load time.
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    select(nodeId)
+    // Focus the chat panel (switches the right tab to AI mode).
+    import("./chat-panel").then(({ focusAiPanel }) => focusAiPanel())
+  }
   return (
     <button
       type="button"
       title="Ask AI"
       disabled={disabled}
-      onClick={(e) => {
-        e.stopPropagation()
-        // Select the node so the editor context reflects what's being edited,
-        // then open the assistant. The assistant opens ONLY because
-        // openAiAssistant sets openNodeId — selection alone must NOT open it.
-        select(nodeId)
-        openAiAssistant(nodeId)
-      }}
+      onClick={handleClick}
       onMouseDown={(e) => e.stopPropagation()}
       className={cn(
         "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium leading-none transition",

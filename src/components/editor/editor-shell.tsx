@@ -8,9 +8,8 @@ import {
 } from "@/components/ui/resizable"
 import { TopBar } from "./top-bar"
 import { LeftSidebar } from "./left-sidebar"
-import { RightPanel } from "./right-panel"
+import { TabbedRightPanel } from "./chat-panel"
 import { EditorCanvas } from "./canvas"
-import { AiAssistant } from "./ai-assistant"
 import { AssetManager } from "./asset-manager"
 import { useEditorStore } from "@/lib/editor/store"
 import { useEditorShortcuts } from "@/hooks/use-editor-shortcuts"
@@ -133,13 +132,10 @@ export function EditorShell({
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={24} minSize={18} maxSize={38}>
-            <RightPanel />
+            <TabbedRightPanel />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-      {/* AI assistant — mounted once; opens via the toolbar's Ask AI button.
-          Opening/closing never touches editor history or dirty state. */}
-      <AiAssistant />
       {/* Asset manager — mounted once; opens via any ImageInput's Browse
           button. Selection writes the URL back to the field's onChange. */}
       <AssetManager />
