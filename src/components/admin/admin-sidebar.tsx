@@ -3,53 +3,60 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { signOut } from "next-auth/react"
-import { LayoutDashboard, Globe, Settings, LogOut, ShieldCheck } from "lucide-react"
+import {
+  ShieldCheck,
+  LayoutDashboard,
+  Users,
+  FolderKanban,
+  ArrowLeft,
+  LogOut,
+} from "lucide-react"
 import { AppLogo } from "@/components/shared/app-logo"
 import {
   Avatar,
   AvatarFallback,
 } from "@/components/ui/avatar"
-import { cn } from "@/lib/utils"
-import { initials } from "@/lib/utils"
+import { cn, initials } from "@/lib/utils"
 
-interface NavItem {
+interface AdminNavItem {
   href: string
   label: string
   icon: typeof LayoutDashboard
   exact?: boolean
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/websites", label: "Websites", icon: Globe, exact: true },
-  { href: "/settings", label: "Settings", icon: Settings, exact: true },
+const ADMIN_NAV_ITEMS: AdminNavItem[] = [
+  { href: "/superadmin", label: "Overview", icon: LayoutDashboard, exact: true },
+  { href: "/superadmin/users", label: "Users", icon: Users },
+  { href: "/superadmin/projects", label: "Projects", icon: FolderKanban },
 ]
 
-export function DashboardSidebar({
+export function AdminSidebar({
   userName,
   userEmail,
-  role,
 }: {
   userName: string | null
   userEmail: string
-  role?: string | null
 }) {
   const pathname = usePathname()
-  const isAdmin = role === "admin"
 
-  const isActive = (item: NavItem) =>
+  const isActive = (item: AdminNavItem) =>
     item.exact ? pathname === item.href : pathname?.startsWith(item.href)
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-card md:flex">
-      {/* Logo */}
-      <div className="flex h-16 items-center border-b px-4">
-        <AppLogo href="/dashboard" size="sm" />
+      {/* Logo + admin badge */}
+      <div className="flex h-16 items-center gap-2 border-b px-4">
+        <AppLogo href="/superadmin" size="sm" />
+        <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+          <ShieldCheck className="h-3 w-3" />
+          Admin
+        </span>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 p-3">
-        {NAV_ITEMS.map((item) => {
+        {ADMIN_NAV_ITEMS.map((item) => {
           const Icon = item.icon
           const active = isActive(item)
           return (
@@ -70,21 +77,16 @@ export function DashboardSidebar({
         })}
       </nav>
 
-      {/* Super admin link — only shown to admins */}
-      {isAdmin ? (
-        <div className="border-t p-3">
-          <Link
-            href="/superadmin"
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition",
-              "bg-primary/5 text-primary hover:bg-primary/10"
-            )}
-          >
-            <ShieldCheck className="h-4 w-4" />
-            Super Admin
-          </Link>
-        </div>
-      ) : null}
+      {/* Back to user dashboard */}
+      <div className="border-t p-3">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to User Dashboard
+        </Link>
+      </div>
 
       {/* User + logout */}
       <div className="border-t p-3">
@@ -95,7 +97,7 @@ export function DashboardSidebar({
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium">{userName || "User"}</p>
+            <p className="truncate text-xs font-medium">{userName || "Admin"}</p>
             <p className="truncate text-[11px] text-muted-foreground">{userEmail}</p>
           </div>
         </div>

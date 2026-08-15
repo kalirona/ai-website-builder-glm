@@ -53,7 +53,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex min-h-screen bg-muted/30">
-      <DashboardSidebar userName={user.name} userEmail={user.email} />
+      <DashboardSidebar userName={user.name} userEmail={user.email} role={user.role} />
 
       <div className="flex min-h-screen flex-1 flex-col">
         <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">

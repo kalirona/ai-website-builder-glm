@@ -827,3 +827,68 @@ Work Log:
 - Registry pattern: untouched (19 components still register via `src/components/website/index.ts`).
 - AI pipeline: untouched (`ai-assistant.tsx` `openAiAssistant(nodeId)` is reused by the context menu).
 - No new npm dependencies added — everything used (`@dnd-kit/core`, `react-syntax-highlighter`, `react-dom/server`, all shadcn/ui components, lucide-react icons) was already installed.
+
+---
+Task ID: 3.x-admin
+Agent: full-stack-developer (admin)
+Task: Build Super Admin dashboard + admin API routes + role-based access control
+
+Work Log:
+- Extended NextAuth config to propagate `role` end-to-end: `authorize` now returns `role` from the DB row, the `jwt` callback stashes it on the token, and the `session` callback exposes it on `session.user.role`.
+- Added `requireAdmin()` helper in `src/lib/admin-guard.ts` — always re-checks the DB (never trusts the JWT alone) so demoting an admin takes effect on the next request.
+- Built 7 admin API routes under `src/app/api/admin/`, all server-side admin-gated, all returning 401 vs 403 correctly (unauthenticated vs. authenticated-but-not-admin):
+  - `GET /api/admin/stats` — platform-wide totals + 7-day deltas
+  - `GET /api/admin/users` — paginated user list with project counts (never selects `passwordHash`)
+  - `PATCH /api/admin/users/[id]/role` — promote/demote; refuses self-role-change
+  - `DELETE /api/admin/users/[id]` — cascade handled at schema level (Project.owner → Website.project → Page.website all `onDelete: Cascade`); refuses self-delete
+  - `GET /api/admin/projects` — paginated project list with owner email/name
+  - `DELETE /api/admin/projects/[id]` — admin override delete
+  - `POST /api/admin/bootstrap` — one-shot: if zero admins exist, promotes the current user; otherwise 403. Returns the new admin user object.
+- Built admin UI: dedicated `AdminSidebar` (Overview / Users / Projects / Back to User Dashboard / Logout), server-rendered pages for `/superadmin` (overview with stats cards + recent users table + recent projects table), `/superadmin/users` (full list with prev/next pagination), and `/superadmin/projects` (full list with pagination).
+- Built client action components using shadcn `AlertDialog` for confirmations + `sonner` toast for feedback:
+  - `AdminUserActions` — "Make Admin" / "Remove Admin" toggle button + delete-with-confirmation
+  - `AdminProjectActions` — delete-with-confirmation
+  - `BootstrapAdminButton` — used on the bootstrap screen
+- Updated `DashboardSidebar` to accept an optional `role` prop and conditionally render a "Super Admin" link (with `ShieldCheck` icon) at the bottom of the nav. Updated call sites in `dashboard/page.tsx` and `settings/page.tsx` to pass `role={user.role}`.
+- Bootstrap UX: when `requireAdmin()` returns null on `/superadmin` AND no admins exist in the DB, the page renders a centered "Become the first Super Admin" card with the bootstrap button instead of bouncing the user to `/dashboard`. This is the supported first-admin creation path — no manual DB edits needed.
+
+Stage Summary:
+- Admin role flows from DB → JWT → session → client components.
+- All admin actions are server-validated; the client UI is just a convenience layer.
+- Self-protection: you cannot demote or delete yourself via the admin endpoints.
+- Cascade deletes: removing a user removes all their projects/websites/pages automatically (Prisma schema-level `onDelete: Cascade`).
+- Bootstrap is one-shot and idempotent-safe: once an admin exists, the endpoint is permanently disabled (403).
+
+Files created (15):
+- `src/lib/admin-guard.ts`
+- `src/app/api/admin/stats/route.ts`
+- `src/app/api/admin/users/route.ts`
+- `src/app/api/admin/users/[id]/route.ts`
+- `src/app/api/admin/users/[id]/role/route.ts`
+- `src/app/api/admin/projects/route.ts`
+- `src/app/api/admin/projects/[id]/route.ts`
+- `src/app/api/admin/bootstrap/route.ts`
+- `src/app/superadmin/page.tsx`
+- `src/app/superadmin/users/page.tsx`
+- `src/app/superadmin/projects/page.tsx`
+- `src/components/admin/admin-sidebar.tsx`
+- `src/components/admin/admin-user-actions.tsx`
+- `src/components/admin/admin-project-actions.tsx`
+- `src/components/admin/bootstrap-admin-button.tsx`
+
+Files modified (4):
+- `src/lib/auth.ts` — `authorize` returns `role`; `jwt` + `session` callbacks propagate it
+- `src/components/dashboard/sidebar.tsx` — optional `role` prop + conditional "Super Admin" link
+- `src/app/dashboard/page.tsx` — pass `role={user.role}` to sidebar
+- `src/app/settings/page.tsx` — pass `role={user.role}` to sidebar
+
+Verification:
+- `bun run lint` → 0 errors, 0 warnings (exit 0)
+- `bunx tsc --noEmit` → 0 errors in `src/` (only pre-existing errors in `examples/` and `skills/` directories, which are out of scope and unchanged by this task)
+- No new npm dependencies added — all UI primitives (Card, Table, Badge, Button, AlertDialog) and icons (ShieldCheck, Users, FolderKanban, Globe, FileText, ChevronLeft/Right, etc.) were already in the project.
+
+Security notes:
+- `passwordHash` is never selected in any admin endpoint (explicit `select` clauses omit it).
+- `requireAdmin()` does a fresh DB read on every admin request, so a demoted admin's existing JWT can no longer hit admin endpoints immediately after demotion.
+- The "Cannot change your own role" and "Cannot delete your own account" guards are enforced at the API layer (not just in the UI), so the endpoint is safe even if called directly.
+- Bootstrap checks `adminCount === 0` atomically with a count query before promoting; the worst-case race (two simultaneous bootstrap calls) would create two admins, but the endpoint returns 403 on the second call's check — acceptable for the one-shot deployment-time bootstrap path.

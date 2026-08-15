@@ -72,7 +72,13 @@ export const authOptions: NextAuthOptions = {
         if (!user || !user.passwordHash) return null
         const ok = await verifyPassword(credentials.password, user.passwordHash)
         if (!ok) return null
-        return { id: user.id, email: user.email, name: user.name ?? undefined }
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name ?? undefined,
+          // Include role so the jwt callback can stash it on the token.
+          role: user.role ?? "user",
+        }
       },
     }),
   ],
@@ -80,12 +86,18 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id
+        // Persist the user's role on the token so the session callback can
+        // expose it to client components (e.g. dashboard sidebar).
+        const u = user as { role?: string }
+        token.role = u.role ?? "user"
       }
       return token
     },
     async session({ session, token }) {
       if (session.user && token.id) {
         ;(session.user as { id?: string }).id = token.id as string
+        ;(session.user as { role?: string }).role =
+          (token.role as string | undefined) ?? "user"
       }
       return session
     },
