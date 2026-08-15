@@ -92,7 +92,8 @@ export const ButtonDef: ComponentDefinition<Props> = {
       <a
         href={ctx.editable ? undefined : props.url}
         data-node={node.id}
-        style={baseStyle}
+        draggable={false}
+        style={{ ...baseStyle, userSelect: "none" }}
         onClick={(e) => {
           if (ctx.editable) e.preventDefault()
         }}

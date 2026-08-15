@@ -6,6 +6,14 @@ import { useEditorContext } from "./editor-context"
 /**
  * Inline-editable text. In editor mode renders a contentEditable span that
  * commits to the node store on blur / Enter. In preview renders a plain span.
+ *
+ * IMPORTANT (Phase 2.9 fix): we must NOT swallow the click entirely — the
+ * NodeWrapper needs to see the click so it can select the node. Previously
+ * `stopPropagation` on onClick/onMouseDown prevented selection when the user
+ * clicked directly on the text. Now we only stopPropagation on mousedown
+ * (to prevent the drag listener from starting) but let the click bubble to
+ * the NodeWrapper for selection. The contentEditable still receives focus
+ * via the double-click handler in NodeWrapper.
  */
 export function InlineText({
   nodeId,
@@ -27,13 +35,17 @@ export function InlineText({
   placeholder?: string
   multiline?: boolean
 }) {
-  const { editable, updateProps } = useEditorContext()
+  const { editable, updateProps, select } = useEditorContext()
   const ref = useRef<HTMLElement>(null)
 
-  // keep DOM in sync when external value changes (e.g. undo/redo, AI update)
+  // keep DOM in sync when external value changes (e.g. undo/redo, AI update,
+  // right-panel edit). Only update if the element is NOT currently focused
+  // (otherwise we'd jump the cursor while the user is typing).
   useEffect(() => {
-    if (ref.current && ref.current.textContent !== value) {
-      ref.current.textContent = value
+    if (ref.current && document.activeElement !== ref.current) {
+      if (ref.current.textContent !== value) {
+        ref.current.textContent = value
+      }
     }
   }, [value])
 
@@ -54,8 +66,17 @@ export function InlineText({
       suppressContentEditableWarning
       role="textbox"
       data-inline-text="true"
-      onClick={(e) => e.stopPropagation()}
+      // Do NOT stopPropagation on click — let it bubble to NodeWrapper so the
+      // node gets selected. We DO stopPropagation on mousedown to prevent the
+      // @dnd-kit drag listener from starting a drag when the user clicks text.
       onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        // Select the node this InlineText belongs to (in case the click
+        // didn't reach the wrapper). stopPropagation so the parent wrapper
+        // doesn't ALSO fire select (harmless, but avoids double work).
+        select(nodeId)
+        e.stopPropagation()
+      }}
       onBlur={(e) => {
         const text = e.currentTarget.textContent ?? ""
         if (text !== value) updateProps(nodeId, { [propKey]: text })

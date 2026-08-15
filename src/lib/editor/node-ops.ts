@@ -99,7 +99,7 @@ export function moveNode(
   id: string,
   newParentId: string,
   index?: number
-): EditorData["nodes"] {
+): Record<string, Node> {
   if (id === data.rootId) return data.nodes
   if (id === newParentId) return data.nodes
   // prevent moving into descendant
@@ -107,21 +107,34 @@ export function moveNode(
   const nodes = { ...data.nodes }
   const node = { ...nodes[id] }
   const oldParent = node.parent ? { ...nodes[node.parent] } : null
-  const newParent = { ...nodes[newParentId] }
-  // remove from old parent
+
+  // Remove the node from its old parent's children array.
   if (oldParent) {
     oldParent.children = oldParent.children.filter((c) => c !== id)
     nodes[oldParent.id] = oldParent
   }
+
   node.parent = newParentId
   nodes[id] = node
-  // insert into new parent
-  if (index === undefined || index < 0 || index > newParent.children.length) {
-    newParent.children = [...newParent.children, id]
+
+  // Determine the target parent + its children array AFTER the removal.
+  // If old and new parent are the same, use the already-filtered oldParent
+  // (which has the node removed) — otherwise we'd duplicate the node.
+  const targetParent =
+    oldParent && oldParent.id === newParentId
+      ? oldParent
+      : { ...nodes[newParentId] }
+
+  if (index === undefined || index < 0 || index > targetParent.children.length) {
+    targetParent.children = [...targetParent.children, id]
   } else {
-    newParent.children = [...newParent.children.slice(0, index), id, ...newParent.children.slice(index)]
+    targetParent.children = [
+      ...targetParent.children.slice(0, index),
+      id,
+      ...targetParent.children.slice(index),
+    ]
   }
-  nodes[newParentId] = newParent
+  nodes[newParentId] = targetParent
   return nodes
 }
 

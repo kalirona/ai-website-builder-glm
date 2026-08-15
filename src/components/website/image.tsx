@@ -71,6 +71,7 @@ export const ImageDef: ComponentDefinition<Props> = {
         data-node={node.id}
         src={src}
         alt={alt}
+        draggable={false}
         style={{
           width,
           height,
@@ -78,6 +79,7 @@ export const ImageDef: ComponentDefinition<Props> = {
           borderRadius: radius,
           display: "block",
           maxWidth: "100%",
+          userSelect: "none",
         }}
       />
     )
